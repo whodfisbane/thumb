@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <thread>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -380,12 +381,16 @@ void t_release_chars(GuestThread& t) { mem().free(t.regs()[2]); }
 // guest memory. Many games keep that buffer and write into it while calling
 // Java (e.g. an audio thread filling a byte[] for AudioTrack.write), so the
 // buffer is kept coherent: guest -> Java before every guest-to-Java call, and
-// Java -> guest after it and whenever Java calls into the guest.
+// Java -> guest after it and whenever Java calls into the guest. Only the
+// thread that pinned an array syncs it: another thread's crossing (e.g. touch
+// events arriving on the UI thread) must not touch a buffer the audio thread
+// is filling.
 struct PinnedArray {
     jarray array;  // global reference
     char kind;     // JNI type char
     jsize length;
     size_t bytes;
+    std::thread::id owner;  // only the pinning thread's JNI crossings sync it
 };
 std::mutex g_pinned_mutex;
 std::unordered_map<gaddr, PinnedArray> g_pinned;
@@ -422,7 +427,7 @@ void copy_to_host(JNIEnv* env, const PinnedArray& p, gaddr g) {
 
 gaddr pin(JNIEnv* env, jarray arr, char kind, gaddr is_copy) {
     if (!arr) return 0;
-    PinnedArray p{static_cast<jarray>(env->NewGlobalRef(arr)), kind, env->GetArrayLength(arr), 0};
+    PinnedArray p{static_cast<jarray>(env->NewGlobalRef(arr)), kind, env->GetArrayLength(arr), 0, std::this_thread::get_id()};
     p.bytes = size_t(p.length) * kind_size(kind);
     gaddr g = mem().malloc(p.bytes ? p.bytes : 1);
     copy_to_guest(env, p, g);
@@ -487,14 +492,18 @@ void t_get_critical(GuestThread& t) {
 
 void sync_pinned_to_host(JNIEnv* env) {
     if (!g_pinned_count.load(std::memory_order_relaxed)) return;
+    auto self = std::this_thread::get_id();
     std::lock_guard lk(g_pinned_mutex);
-    for (auto& [g, p] : g_pinned) copy_to_host(env, p, g);
+    for (auto& [g, p] : g_pinned)
+        if (p.owner == self) copy_to_host(env, p, g);
 }
 
 void sync_pinned_to_guest(JNIEnv* env) {
     if (!g_pinned_count.load(std::memory_order_relaxed)) return;
+    auto self = std::this_thread::get_id();
     std::lock_guard lk(g_pinned_mutex);
-    for (auto& [g, p] : g_pinned) copy_to_guest(env, p, g);
+    for (auto& [g, p] : g_pinned)
+        if (p.owner == self) copy_to_guest(env, p, g);
 }
 
 namespace {
