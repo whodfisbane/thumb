@@ -359,7 +359,6 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     )
     val P = dev.thumb.app.core.PatchOptions
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
-    OptionRow("Old Android file paths", "Recommended: behaviour old apps expect", options.legacyFs, { onChange(options.copy(legacyFs = it)) }, info = P.INFO_LEGACY_FS)
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
     OptionRow("Show FPS", "Always-on frames-per-second counter", options.showFps, { onChange(options.copy(showFps = it)) }, info = P.INFO_SHOW_FPS)
     OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) }, P.WARN_SANDBOX)

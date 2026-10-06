@@ -10,7 +10,11 @@ data class PatchOptions(
     val adblock: Boolean = true,
     /** Always-on FPS counter in a corner. */
     val showFps: Boolean = false,
-    /** Compat shims for behaviour modern Android changed (virtual /, positioned asset files). */
+    /**
+     * Compat shims for behaviour modern Android changed (virtual /, positioned
+     * asset files). Always on in the UI: they only act where the app would
+     * otherwise fail. Kept as a switch for troubleshooting.
+     */
     val legacyFs: Boolean = true,
     /** Remove sensitive permissions (contacts, location, camera, ...). */
     val sandbox: Boolean = false,
