@@ -5,7 +5,6 @@ import android.app.AlertDialog;
 import android.app.Application;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -22,8 +21,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -61,8 +58,6 @@ public final class ThumbOverlay {
     private static final int PANEL = 0xEE121614;
     private static final int MUTED = 0xFF9AA8A2;
     private static final float[] SPEEDS = {0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f};
-    private static final String[] ROTATIONS = {"Default", "Landscape", "Portrait"};
-    private static final String[] FULLSCREENS = {"Default", "On", "Off"};
     // The FPS build option: "compat" (60 FPS) or "default" (the screen decides).
     private static String fpsModeDefault = "compat";
 
@@ -73,7 +68,7 @@ public final class ThumbOverlay {
     private static Application app;
     private static boolean menuEnabled;
     private static boolean adblockDefault = true; // the "Block ads" build option
-    private static boolean modFps, modSpeed, modFpsLimit, modAdblock, modScreenOn, modRotation, modFullscreen;
+    private static boolean modFps, modSpeed, modFpsLimit, modAdblock, modScreenOn;
     private static Bitmap icon;
     private static final WeakHashMap<Activity, View> buttons = new WeakHashMap<>();
     private static final WeakHashMap<Activity, TextView> badges = new WeakHashMap<>();
@@ -100,8 +95,6 @@ public final class ThumbOverlay {
         modFpsLimit = mods.optBoolean("fps_unlock");
         modAdblock = mods.optBoolean("adblock");
         modScreenOn = mods.optBoolean("keep_screen_on");
-        modRotation = mods.optBoolean("rotation");
-        modFullscreen = mods.optBoolean("fullscreen");
         prefs = app.getSharedPreferences("thumb_overlay", 0);
         icon = loadIcon();
 
@@ -161,8 +154,6 @@ public final class ThumbOverlay {
         // Persistent mod states, re-applied to every screen of the app.
         applyFps(a, fpsTarget()); // build option, or the menu's FPS unlock
         if (modScreenOn) applyScreenOn(a, prefs.getBoolean("screen_on", false));
-        if (modRotation) applyRotation(a, prefs.getInt("rotation", 0));
-        if (modFullscreen) applyFullscreen(a, prefs.getInt("fullscreen_mode", 0));
 
         if (modFps && prefs.getBoolean("fps_badge", false)) addBadge(a, decor);
 
@@ -292,8 +283,6 @@ public final class ThumbOverlay {
         if (modFpsLimit) addFpsLimit(a, panel);
         if (modAdblock) panel.addView(toggle(a, "Block ads", "adblock", adblockDefault, null, null, ThumbOverlay::nativeSetAdBlock));
         if (modScreenOn) panel.addView(toggle(a, "Keep screen on", "screen_on", false, null, null, on -> applyScreenOn(a, on)));
-        if (modFullscreen) addFullscreen(a, panel);
-        if (modRotation) addRotation(a, panel);
 
         TextView hint = text(a, "Three-finger double tap hides or shows this button.", 12, MUTED);
         hint.setPadding(0, dp(a, 12), 0, 0);
@@ -303,19 +292,32 @@ public final class ThumbOverlay {
         scroll.addView(panel);
         final AlertDialog dialog = new AlertDialog.Builder(a).setView(scroll).create();
 
-        LinearLayout row = new LinearLayout(a);
-        row.setPadding(0, dp(a, 8), 0, 0);
-        TextView hide = button(a, "HIDE");
-        hide.setOnClickListener(v -> { setHidden(a, true); dialog.dismiss(); });
-        row.addView(hide);
-        TextView restart = button(a, "RESTART APP");
+        // Force restart / kill: for when an old app freezes or misbehaves.
+        LinearLayout force = new LinearLayout(a);
+        force.setPadding(0, dp(a, 8), 0, 0);
+        TextView restart = button(a, "FORCE RESTART");
         restart.setOnClickListener(v -> new AlertDialog.Builder(a)
-            .setTitle("Restart the app?")
+            .setTitle("Force restart the app?")
             .setMessage("Unsaved progress will be lost.")
             .setPositiveButton("Restart", (d, w) -> restartApp(a))
             .setNegativeButton("Cancel", null)
             .show());
-        row.addView(restart);
+        force.addView(restart);
+        TextView kill = button(a, "KILL");
+        kill.setTextColor(0xFFFF8A80);
+        kill.setOnClickListener(v -> new AlertDialog.Builder(a)
+            .setTitle("Kill the app?")
+            .setMessage("Closes it immediately. Unsaved progress will be lost.")
+            .setPositiveButton("Kill", (d, w) -> killApp(a))
+            .setNegativeButton("Cancel", null)
+            .show());
+        force.addView(kill);
+        panel.addView(force);
+
+        LinearLayout row = new LinearLayout(a);
+        TextView hide = button(a, "HIDE");
+        hide.setOnClickListener(v -> { setHidden(a, true); dialog.dismiss(); });
+        row.addView(hide);
         TextView close = button(a, "CLOSE");
         close.setOnClickListener(v -> dialog.dismiss());
         row.addView(close);
@@ -420,35 +422,6 @@ public final class ThumbOverlay {
         refresh.run();
     }
 
-    private static void addRotation(final Activity a, LinearLayout panel) {
-        final TextView label = text(a, "Rotation: " + ROTATIONS[prefs.getInt("rotation", 0)], 15, Color.WHITE);
-        label.setPadding(0, dp(a, 10), 0, dp(a, 6));
-        label.setOnClickListener(v -> {
-            final int next = (prefs.getInt("rotation", 0) + 1) % ROTATIONS.length;
-            Runnable apply = () -> {
-                prefs.edit().putInt("rotation", next).apply();
-                label.setText("Rotation: " + ROTATIONS[next]);
-                applyRotation(a, next);
-            };
-            apply.run();
-        });
-        panel.addView(label);
-        panel.addView(text(a, "Tap to switch: Default (as the app wants) → Landscape → Portrait", 12, MUTED));
-    }
-
-    private static void addFullscreen(final Activity a, LinearLayout panel) {
-        final TextView label = text(a, "Fullscreen: " + FULLSCREENS[prefs.getInt("fullscreen_mode", 0)], 15, Color.WHITE);
-        label.setPadding(0, dp(a, 10), 0, dp(a, 6));
-        label.setOnClickListener(v -> {
-            int next = (prefs.getInt("fullscreen_mode", 0) + 1) % FULLSCREENS.length;
-            prefs.edit().putInt("fullscreen_mode", next).apply();
-            label.setText("Fullscreen: " + FULLSCREENS[next]);
-            applyFullscreen(a, next);
-        });
-        panel.addView(label);
-        panel.addView(text(a, "Tap to switch: Default (as the app wants) → On → Off", 12, MUTED));
-    }
-
     private static TextView text(Activity a, String s, float sp, int color) {
         TextView t = new TextView(a);
         t.setText(s);
@@ -522,59 +495,10 @@ public final class ThumbOverlay {
         else a.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
-    /** Each screen's own orientation before THUMB changed it, for "Default". */
-    private static final WeakHashMap<Activity, Integer> originalOrientation = new WeakHashMap<>();
-
-    /** Rotation: 0 = Default (the app's own choice), 1 = landscape, 2 = portrait (both follow the sensor). */
-    private static void applyRotation(Activity a, int choice) {
-        Integer original = originalOrientation.get(a);
-        if (choice == 0) {
-            if (original == null) return; // never touched: nothing to undo
-            originalOrientation.remove(a);
-            a.setRequestedOrientation(original);
-            return;
-        }
-        if (original == null) originalOrientation.put(a, a.getRequestedOrientation());
-        a.setRequestedOrientation(choice == 1 ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
-    }
-
-    /** The system-bar state each screen had before THUMB changed it, for "Default". */
-    private static final WeakHashMap<Activity, Integer> originalBars = new WeakHashMap<>();
-
-    /** Fullscreen mode: 0 = Default (the app's own choice), 1 = On (bars hidden), 2 = Off (bars shown). */
-    private static void applyFullscreen(Activity a, int mode) {
-        View decor = a.getWindow().getDecorView();
-        Integer original = originalBars.get(a);
-        if (mode == 0) {
-            if (original == null) return; // never touched: nothing to undo
-            originalBars.remove(a);
-            if (Build.VERSION.SDK_INT >= 30) setBars(decor, original == 0);
-            else decor.setSystemUiVisibility(original);
-            return;
-        }
-        if (original == null) {
-            if (Build.VERSION.SDK_INT >= 30) {
-                WindowInsets insets = decor.getRootWindowInsets();
-                originalBars.put(a, insets == null || insets.isVisible(WindowInsets.Type.statusBars()) ? 1 : 0);
-            } else {
-                originalBars.put(a, decor.getSystemUiVisibility());
-            }
-        }
-        if (Build.VERSION.SDK_INT >= 30) setBars(decor, mode == 1);
-        else decor.setSystemUiVisibility(mode == 1 ? View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
-            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE : 0);
-    }
-
-    private static void setBars(View decor, boolean hide) {
-        WindowInsetsController c = decor.getWindowInsetsController();
-        if (c == null) return;
-        if (hide) {
-            c.hide(WindowInsets.Type.systemBars());
-            c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-        } else {
-            c.show(WindowInsets.Type.systemBars());
-        }
+    /** Closes the app right away (also removes it from recents). */
+    private static void killApp(Activity a) {
+        a.finishAndRemoveTask();
+        main.postDelayed(() -> android.os.Process.killProcess(android.os.Process.myPid()), 150);
     }
 
     /** Relaunches the app from scratch. */

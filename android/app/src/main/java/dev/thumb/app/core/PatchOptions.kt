@@ -33,7 +33,7 @@ data class PatchOptions(
         put("overlay", overlay)
         // The menu always has every mod; "mods" stays so the runtime format can grow per-mod switches again.
         put("mods", org.json.JSONObject().apply {
-            for (m in listOf("fps_counter", "speed", "fps_unlock", "adblock", "keep_screen_on", "rotation", "fullscreen")) put(m, overlay)
+            for (m in listOf("fps_counter", "speed", "fps_unlock", "adblock", "keep_screen_on")) put(m, overlay)
         })
     }.toString(2)
 
@@ -61,8 +61,8 @@ data class PatchOptions(
             "• FPS unlock: 30 FPS up to your screen's maximum\n" +
             "• Ad-block on/off\n" +
             "• Keep screen on\n" +
-            "• Rotation and fullscreen: Default (as the app wants) or forced\n" +
-            "• Hide and Restart app\n\n" +
+            "• Force restart / kill (for frozen apps)\n" +
+            "• Hide the button (three-finger double tap brings it back)\n\n" +
             "Everything starts as the app normally behaves; nothing changes until you use it. " +
             "The button may cover part of the screen: drag it anywhere, or hide it with a three-finger double tap."
         const val INFO_LEGACY_FS = "Recommended. Old apps expect things modern Android changed: browsing from \"/\", " +
@@ -74,7 +74,5 @@ data class PatchOptions(
             "Old apps often assume they have these and may crash or lose features (e.g. friend lists, maps, photos)."
         const val WARN_BLOCK_INTERNET = "The app can't go online at all: no online play, leaderboards, cloud saves or downloads. " +
             "Apps that require a connection to start may refuse to run."
-        const val WARN_ROTATION = "Forcing an orientation an app wasn't designed for can stretch or cut off its screen."
-        const val WARN_FULLSCREEN = "Some old apps draw their own buttons at the screen edges; hiding the system bars can make them hard to reach."
     }
 }
