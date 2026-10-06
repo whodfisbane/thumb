@@ -65,8 +65,6 @@ public final class ThumbOverlay {
     static final String WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play.";
     static final String WARN_FPS_UNLOCK = "Many older games tie their game speed to the frame rate. Unlocking FPS may make the game run too fast, " +
         "break physics or animations, or drain more battery. If the game speeds up, use the speed slider to bring it back to 1×.";
-    static final String WARN_ROTATION = "Forcing an orientation an app wasn't designed for can stretch or cut off its screen.";
-    static final String WARN_FULLSCREEN = "Some old apps draw their own buttons at the screen edges; hiding the system bars can make them hard to reach.";
 
     private static SharedPreferences prefs;
     private static Application app;
@@ -276,7 +274,7 @@ public final class ThumbOverlay {
             on -> applyFpsUnlock(a, on)));
         if (modAdblock) panel.addView(toggle(a, "Block ads", "adblock", true, null, null, ThumbOverlay::nativeSetAdBlock));
         if (modScreenOn) panel.addView(toggle(a, "Keep screen on", "screen_on", false, null, null, on -> applyScreenOn(a, on)));
-        if (modFullscreen) panel.addView(toggle(a, "Fullscreen (hide system bars)", "fullscreen", false, "Go fullscreen?", WARN_FULLSCREEN,
+        if (modFullscreen) panel.addView(toggle(a, "Fullscreen (hide system bars)", "fullscreen", false, null, null,
             on -> applyFullscreen(a, on)));
         if (modRotation) addRotation(a, panel);
 
@@ -375,13 +373,7 @@ public final class ThumbOverlay {
                 label.setText("Rotation: " + ROTATIONS[next]);
                 applyRotation(a, next);
             };
-            if (next != 0 && !prefs.getBoolean("rotation_warned", false)) {
-                new AlertDialog.Builder(a).setTitle("Lock rotation?").setMessage(WARN_ROTATION)
-                    .setPositiveButton("Lock", (d, w) -> { prefs.edit().putBoolean("rotation_warned", true).apply(); apply.run(); })
-                    .setNegativeButton("Cancel", null).show();
-            } else {
-                apply.run();
-            }
+            apply.run();
         });
         panel.addView(label);
         panel.addView(text(a, "Tap to switch: Auto → Landscape → Portrait", 12, MUTED));

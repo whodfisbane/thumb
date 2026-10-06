@@ -24,7 +24,7 @@ data class PatchOptions(
     // ---- THUMB overlay (in-game menu) and its mods ----
     val overlay: Boolean = true,
     val fpsCounter: Boolean = true,
-    val speed: Boolean = true,
+    val speed: Boolean = false,
     val fpsUnlock: Boolean = false,
     val adblockToggle: Boolean = false,
     val keepScreenOn: Boolean = true,

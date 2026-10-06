@@ -348,38 +348,49 @@ private fun OptionRow(
 
 @Composable
 private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
-    var confirmFpsUnlock by remember { mutableStateOf(false) }
-    if (confirmFpsUnlock) AlertDialog(
-        onDismissRequest = { confirmFpsUnlock = false },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        title = { Text("Include FPS unlock?", fontWeight = FontWeight.Bold) },
-        text = { Text(dev.thumb.app.core.PatchOptions.WARN_FPS_UNLOCK, color = Muted) },
-        confirmButton = { TTextButton(onClick = { confirmFpsUnlock = false; onChange(options.copy(fpsUnlock = true)) }) { Text(label("Include")) } },
-        dismissButton = { TTextButton(onClick = { confirmFpsUnlock = false }) { Text(label("Cancel"), color = Muted) } },
-    )
     val P = dev.thumb.app.core.PatchOptions
+    // Only the two options that change how a game behaves ask for confirmation.
+    var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+    var confirmText by remember { mutableStateOf("") }
+    confirm?.let { (title, accept) ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            title = { Text(title, fontWeight = FontWeight.Bold) },
+            text = { Text(confirmText, color = Muted) },
+            confirmButton = { TTextButton(onClick = { confirm = null; accept() }) { Text(label("Include")) } },
+            dismissButton = { TTextButton(onClick = { confirm = null }) { Text(label("Cancel"), color = Muted) } },
+        )
+    }
+    fun ask(title: String, text: String, accept: () -> Unit) {
+        confirmText = text
+        confirm = title to accept
+    }
+
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
-    OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
-    OptionRow("Show FPS", "Always-on frames-per-second counter", options.showFps, { onChange(options.copy(showFps = it)) }, info = P.INFO_SHOW_FPS)
-    OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) }, P.WARN_SANDBOX)
+    OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) })
+    OptionRow("Show FPS", "Always-on frames-per-second counter", options.showFps, { onChange(options.copy(showFps = it)) })
+    OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) },
+        info = P.WARN_SANDBOX)
     OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
-        P.WARN_BLOCK_INTERNET, enabled = options.sandbox, indent = true)
+        enabled = options.sandbox, indent = true, info = P.WARN_BLOCK_INTERNET)
 
     Text("THUMB overlay", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent(), modifier = Modifier.padding(top = 8.dp))
     OptionRow("In-game menu", "Floating THUMB button with the mods below", options.overlay, { onChange(options.copy(overlay = it)) }, info = P.INFO_OVERLAY)
     OptionRow("FPS counter", "Frames per second in the menu", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
         enabled = options.overlay, indent = true)
-    OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, { onChange(options.copy(speed = it)) },
-        P.WARN_SPEED, enabled = options.overlay, indent = true)
+    OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, {
+        if (it) ask("Include the speed slider?", P.WARN_SPEED) { onChange(options.copy(speed = true)) } else onChange(options.copy(speed = false))
+    }, enabled = options.overlay, indent = true)
     OptionRow("FPS unlock", "Use the screen's highest refresh rate", options.fpsUnlock, {
-        if (it) confirmFpsUnlock = true else onChange(options.copy(fpsUnlock = false))
-    }, P.WARN_FPS_UNLOCK, enabled = options.overlay, indent = true)
+        if (it) ask("Include FPS unlock?", P.WARN_FPS_UNLOCK) { onChange(options.copy(fpsUnlock = true)) } else onChange(options.copy(fpsUnlock = false))
+    }, enabled = options.overlay, indent = true)
     OptionRow("Keep screen on", "For reading, loading screens, idle games", options.keepScreenOn, { onChange(options.copy(keepScreenOn = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Rotation lock", "Auto, landscape or portrait", options.rotation, { onChange(options.copy(rotation = it)) },
-        P.WARN_ROTATION, enabled = options.overlay, indent = true)
+        enabled = options.overlay, indent = true)
     OptionRow("Fullscreen", "Hide the status and navigation bars", options.fullscreen, { onChange(options.copy(fullscreen = it)) },
-        P.WARN_FULLSCREEN, enabled = options.overlay, indent = true)
+        enabled = options.overlay, indent = true)
     OptionRow("Ad-block toggle", "Switch ad blocking while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
         enabled = options.overlay, indent = true)
     Text("Hide and Restart are always in the menu.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 18.dp))
