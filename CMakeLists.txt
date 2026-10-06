@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(arm32_revive CXX C)
+project(thumb CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,10 +38,10 @@ target_compile_options(host32 PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
 # --- Android: runtime + per-library stub ---
 if (ANDROID)
-    add_library(arm32revive SHARED shim/runtime.cpp)
-    target_link_libraries(arm32revive PRIVATE host32 dl)
-    add_library(revive_stub SHARED shim/stub.cpp)
-    target_link_libraries(revive_stub PRIVATE log dl)
+    add_library(thumb SHARED shim/runtime.cpp)
+    target_link_libraries(thumb PRIVATE host32 dl)
+    add_library(thumb_stub SHARED shim/stub.cpp)
+    target_link_libraries(thumb_stub PRIVATE log dl)
 endif()
 
 # --- Linux test harness ---

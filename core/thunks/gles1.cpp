@@ -12,6 +12,7 @@
 #include "thunks/thunks.h"
 
 #ifdef __ANDROID__
+#define GL_GLEXT_PROTOTYPES 1
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #endif
@@ -142,7 +143,7 @@ void t_gl_get_integerv(GuestThread& t) {
 void t_gl_fb_status(GuestThread& t) { t.regs()[0] = 0x8CD5; }  // GL_FRAMEBUFFER_COMPLETE_OES
 
 void t_glGetString(GuestThread& t) {
-    static gaddr s = mem().static_string("arm32-revive harness (no GPU)");
+    static gaddr s = mem().static_string("THUMB harness (no GPU)");
     t.regs()[0] = s;
 }
 

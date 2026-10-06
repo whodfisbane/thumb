@@ -17,7 +17,7 @@ LogLevel log_level() { return g_level.load(std::memory_order_relaxed); }
 static void vlog(LogLevel level, const char* fmt, va_list ap) {
 #ifdef __ANDROID__
     static const int prio[] = {ANDROID_LOG_VERBOSE, ANDROID_LOG_DEBUG, ANDROID_LOG_INFO, ANDROID_LOG_WARN, ANDROID_LOG_ERROR};
-    __android_log_vprint(prio[int(level)], "host32", fmt, ap);
+    __android_log_vprint(prio[int(level)], "thumb", fmt, ap);
 #else
     static const char* tag[] = {"T", "D", "I", "W", "E"};
     char buf[2048];

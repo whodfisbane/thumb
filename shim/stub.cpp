@@ -14,7 +14,7 @@ namespace {
 using LoadFn = jint (*)(JavaVM*, const char*, const char*);
 
 void log_error(const char* msg, const char* detail) {
-    __android_log_print(ANDROID_LOG_ERROR, "host32", "stub: %s %s", msg, detail ? detail : "");
+    __android_log_print(ANDROID_LOG_ERROR, "thumb", "stub: %s %s", msg, detail ? detail : "");
 }
 
 }  // namespace
@@ -31,14 +31,14 @@ extern "C" __attribute__((visibility("default"))) jint JNI_OnLoad(JavaVM* vm, vo
     std::string name = self.substr(slash + 1);
     std::string guest = name.substr(0, name.size() - 3) + "_arm32.so";
 
-    void* rt = dlopen("libarm32revive.so", RTLD_NOW | RTLD_GLOBAL);
+    void* rt = dlopen("libthumb.so", RTLD_NOW | RTLD_GLOBAL);
     if (!rt) {
-        log_error("cannot load libarm32revive.so:", dlerror());
+        log_error("cannot load libthumb.so:", dlerror());
         return JNI_ERR;
     }
-    auto load = reinterpret_cast<LoadFn>(dlsym(rt, "revive_load"));
+    auto load = reinterpret_cast<LoadFn>(dlsym(rt, "thumb_load"));
     if (!load) {
-        log_error("revive_load missing", nullptr);
+        log_error("thumb_load missing", nullptr);
         return JNI_ERR;
     }
     return load(vm, dir.c_str(), guest.c_str());

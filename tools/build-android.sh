@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cross-compiles the translator for arm64 Android.
 #   NDK=/path/to/android-ndk tools/build-android.sh
-# Output: build-android/libarm32revive.so and build-android/librevive_stub.so
+# Output: build-android/libthumb.so and build-android/libthumb_stub.so
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NDK=${NDK:-/home/powmy/android-sdk/android-ndk-r30}
@@ -34,5 +34,6 @@ cmake -S "$ROOT" -B "$OUT" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-$API \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_CXX_FLAGS="-include cstdlib" \
     -DCMAKE_FIND_ROOT_PATH="$DEPS" -DBOOST_ROOT="$DEPS" -DBoost_INCLUDE_DIR="$DEPS/include" >/dev/null
-ninja -C "$OUT" arm32revive revive_stub
+ninja -C "$OUT" thumb thumb_stub

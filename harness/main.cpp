@@ -105,7 +105,7 @@ static void boot_worms3(int frames) {
     native<V>("com/worms3/app/Main.nativeOnCreateCallback")(env, main_activity);
     // GERenderer constructor
     H32_INFO("boot: nativeSetDeviceID");
-    native<V_SS>("com/worms3/app/GERenderer.nativeSetDeviceID")(env, renderer, fakejni::new_string("arm32revive"),
+    native<V_SS>("com/worms3/app/GERenderer.nativeSetDeviceID")(env, renderer, fakejni::new_string("thumb"),
                                                                 fakejni::new_string("harness"));
     H32_INFO("boot: nativeSetExternalStorageState(true, true)");
     native<V_ZZ>("com/worms3/app/GERenderer.nativeSetExternalStorageState")(env, renderer, JNI_TRUE, JNI_TRUE);
