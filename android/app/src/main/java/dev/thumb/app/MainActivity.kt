@@ -101,12 +101,15 @@ private fun ThumbLogo(modifier: Modifier, description: String? = null) = Image(
     colorFilter = if (LocalHolo.current) androidx.compose.ui.graphics.ColorFilter.tint(HoloBlue) else null,
 )
 
-/** Text with **bold** parts (marked with double asterisks) for the important words. */
-private fun rich(text: String) = androidx.compose.ui.text.buildAnnotatedString {
-    val parts = text.split("**")
-    for ((i, part) in parts.withIndex()) {
-        if (i % 2 == 1) withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)) { append(part) }
-        else append(part)
+/**
+ * Text with highlighted parts marked by double asterisks: bold white by
+ * default, or just coloured (normal weight) when [highlight] is given.
+ */
+private fun rich(text: String, highlight: Color? = null) = androidx.compose.ui.text.buildAnnotatedString {
+    val style = if (highlight != null) androidx.compose.ui.text.SpanStyle(color = highlight)
+    else androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)
+    for ((i, part) in text.split("**").withIndex()) {
+        if (i % 2 == 1) withStyle(style) { append(part) } else append(part)
     }
 }
 
@@ -282,7 +285,7 @@ private fun Steps(steps: List<String>) {
 @Composable
 private fun IdleCard(onPick: () -> Unit) = PanelCard {
     Text("Run old 32-bit apps and games on this phone", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-    Text(rich("Pick an APK. THUMB **checks** it, adds its **ARM32 translator**, signs it with **this phone's own key** and **installs** it."), color = Muted)
+    Text(rich("Pick an APK. THUMB **checks** it, adds its **ARM32 translator**, signs it with **this phone's own key** and **installs** it.", accent()), color = Muted)
     TButton(onClick = onPick, modifier = Modifier.fillMaxWidth()) { Text(label("Add app"), fontWeight = FontWeight.Bold) }
 }
 
@@ -355,18 +358,32 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
         dismissButton = { TTextButton(onClick = { confirmFpsUnlock = false }) { Text(label("Cancel"), color = Muted) } },
     )
     val P = dev.thumb.app.core.PatchOptions
-    Text("Options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
+    Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
+    OptionRow("Old Android file paths", "Recommended: behaviour old apps expect", options.legacyFs, { onChange(options.copy(legacyFs = it)) }, info = P.INFO_LEGACY_FS)
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
-    OptionRow("THUMB overlay", "In-game menu with the mods below", options.overlay, { onChange(options.copy(overlay = it)) }, info = P.WARN_OVERLAY)
-    OptionRow("FPS counter", "Shows frames per second", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
+    OptionRow("Show FPS", "Always-on frames-per-second counter", options.showFps, { onChange(options.copy(showFps = it)) }, info = P.INFO_SHOW_FPS)
+    OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) }, P.WARN_SANDBOX)
+    OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
+        P.WARN_BLOCK_INTERNET, enabled = options.sandbox, indent = true)
+
+    Text("THUMB overlay", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent(), modifier = Modifier.padding(top = 8.dp))
+    OptionRow("In-game menu", "Floating THUMB button with the mods below", options.overlay, { onChange(options.copy(overlay = it)) }, info = P.INFO_OVERLAY)
+    OptionRow("FPS counter", "Frames per second in the menu", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
         enabled = options.overlay, indent = true)
-    OptionRow("Speed slider", "Slow-motion or fast-forward the game", options.speed, { onChange(options.copy(speed = it)) },
+    OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, { onChange(options.copy(speed = it)) },
         P.WARN_SPEED, enabled = options.overlay, indent = true)
     OptionRow("FPS unlock", "Use the screen's highest refresh rate", options.fpsUnlock, {
         if (it) confirmFpsUnlock = true else onChange(options.copy(fpsUnlock = false))
     }, P.WARN_FPS_UNLOCK, enabled = options.overlay, indent = true)
-    OptionRow("Ad-block toggle", "Switch ad blocking on/off while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
+    OptionRow("Keep screen on", "For reading, loading screens, idle games", options.keepScreenOn, { onChange(options.copy(keepScreenOn = it)) },
         enabled = options.overlay, indent = true)
+    OptionRow("Rotation lock", "Auto, landscape or portrait", options.rotation, { onChange(options.copy(rotation = it)) },
+        P.WARN_ROTATION, enabled = options.overlay, indent = true)
+    OptionRow("Fullscreen", "Hide the status and navigation bars", options.fullscreen, { onChange(options.copy(fullscreen = it)) },
+        P.WARN_FULLSCREEN, enabled = options.overlay, indent = true)
+    OptionRow("Ad-block toggle", "Switch ad blocking while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
+        enabled = options.overlay, indent = true)
+    Text("Hide and Restart are always in the menu.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 18.dp))
 }
 
 @Composable
@@ -435,9 +452,9 @@ private fun ObbCard(s: State.ObbNeeded, vm: MainViewModel) = PanelCard {
         return@PanelCard
     }
     TButton(onClick = { if (!vm.autoSearchObb(s)) chooser = true }, modifier = Modifier.fillMaxWidth()) {
-        Text("Auto-search for OBB", fontWeight = FontWeight.Bold)
+        Text(label("Find automatically"), fontWeight = FontWeight.Bold)
     }
-    TOutlinedButton(onClick = { filePicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text(label("Pick OBB file manually")) }
+    TOutlinedButton(onClick = { filePicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text(label("Select manually")) }
     TTextButton(onClick = { vm.skipObb(s) }, modifier = Modifier.fillMaxWidth()) { Text(label("Skip"), color = Muted) }
 }
 

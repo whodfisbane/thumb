@@ -42,6 +42,67 @@ object ManifestPatcher {
         return changed
     }
 
+    private const val RES_XML_END_ELEMENT = 0x0103
+    private const val ATTR_NAME = 0x01010003
+    private const val TYPE_STRING = 0x03
+
+    /**
+     * Removes <uses-permission> (and -sdk-23) elements whose android:name is in
+     * [names]. Element chunks are dropped and the document size fixed up; the
+     * string pool is untouched (unused strings are harmless).
+     */
+    fun removePermissions(axml: ByteArray, names: Set<String>): Pair<ByteArray, List<String>> {
+        val b = ByteBuffer.wrap(axml).order(ByteOrder.LITTLE_ENDIAN)
+        var strings: List<String> = emptyList()
+        var resMap = IntArray(0)
+        val keep = java.io.ByteArrayOutputStream(axml.size)
+        val headerSize = b.getShort(2).toInt() and 0xFFFF
+        keep.write(axml, 0, headerSize)
+        val removed = ArrayList<String>()
+        var skipping = false
+        var pos = headerSize
+        while (pos + 8 <= axml.size) {
+            val type = b.getShort(pos).toInt() and 0xFFFF
+            val chunkHeader = b.getShort(pos + 2).toInt() and 0xFFFF
+            val size = b.getInt(pos + 4)
+            if (size <= 0) break
+            var drop = false
+            when (type) {
+                RES_STRING_POOL -> strings = readStringPool(b, pos)
+                RES_XML_RESOURCE_MAP -> resMap = IntArray((size - chunkHeader) / 4) { b.getInt(pos + chunkHeader + it * 4) }
+                RES_XML_START_ELEMENT -> {
+                    val ext = pos + chunkHeader
+                    val element = strings.getOrNull(b.getInt(ext + 4))
+                    if (element == "uses-permission" || element == "uses-permission-sdk-23") {
+                        val attrStart = b.getShort(ext + 8).toInt() and 0xFFFF
+                        val attrSize = b.getShort(ext + 10).toInt() and 0xFFFF
+                        val attrCount = b.getShort(ext + 12).toInt() and 0xFFFF
+                        for (i in 0 until attrCount) {
+                            val a = ext + attrStart + i * attrSize
+                            if (resMap.getOrNull(b.getInt(a + 4)) != ATTR_NAME) continue
+                            val value = if ((axml[a + 15].toInt() and 0xFF) == TYPE_STRING) strings.getOrNull(b.getInt(a + 16))
+                                else strings.getOrNull(b.getInt(a + 8))
+                            if (value != null && value in names) {
+                                drop = true
+                                skipping = true
+                                removed += value
+                            }
+                        }
+                    }
+                }
+                RES_XML_END_ELEMENT -> if (skipping) {
+                    drop = true // the matching end of a removed (childless) element
+                    skipping = false
+                }
+            }
+            if (!drop) keep.write(axml, pos, size)
+            pos += size
+        }
+        val out = keep.toByteArray()
+        ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN).putInt(4, out.size)
+        return out to removed
+    }
+
     /** Calls [fn] for every attribute of every element (buffer, attr offset, resource id, data type). */
     private fun forEachAttribute(out: ByteArray, fn: (ByteBuffer, Int, Int, Int) -> Unit) {
         val b = ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN)

@@ -20,7 +20,12 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
     }
 
     /** Extra content for the base APK: the in-game menu dex and the options file. */
-    class BaseExtras(val overlayDex: ByteArray?, val optionsJson: String)
+    class BaseExtras(
+        val overlayDex: ByteArray?,
+        val optionsJson: String,
+        val icon: ByteArray?,
+        val removePermissions: Set<String> = emptySet(),
+    )
 
     fun patch(input: File, output: File, base: BaseExtras? = null, log: (String) -> Unit = {}): Result {
         val started = System.nanoTime()
@@ -40,9 +45,16 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
                             e.isDirectory -> Unit
                             name.startsWith("lib/") -> if (name.startsWith("lib/armeabi-v7a/") && name.endsWith(".so")) armLibs += e
                             name.startsWith("META-INF/") && isSignatureFile(name) -> Unit // old signature
-                            base != null && name == "assets/thumb/options.json" -> Unit // replaced below
+                            base != null && name.startsWith("assets/thumb/") -> Unit // replaced below
                             name == "AndroidManifest.xml" -> {
-                                val r = ManifestPatcher.patch(src.getInputStream(e).readBytes(), MIN_TARGET_SDK)
+                                var manifest = src.getInputStream(e).readBytes()
+                                if (base != null && base.removePermissions.isNotEmpty()) {
+                                    val (stripped, removed) = ManifestPatcher.removePermissions(manifest, base.removePermissions)
+                                    manifest = stripped
+                                    log(if (removed.isEmpty()) "sandbox: no sensitive permissions to remove"
+                                        else "sandbox: removed ${removed.joinToString { it.substringAfterLast('.') }}")
+                                }
+                                val r = ManifestPatcher.patch(manifest, MIN_TARGET_SDK)
                                 targetOld = r.oldTarget
                                 targetNew = r.newTarget
                                 r.newTarget?.let { log("targetSdkVersion ${r.oldTarget} -> $it") }
@@ -64,6 +76,7 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
                         val now = System.currentTimeMillis()
                         out.addDeflated("assets/thumb/options.json", base.optionsJson.toByteArray(), now)
                         log("added THUMB options (assets/thumb/options.json)")
+                        base.icon?.let { out.addStored("assets/thumb/icon.png", it, now) }
                         base.overlayDex?.let { dex ->
                             val name = "classes${maxDex + 1}.dex"
                             out.addDeflated(name, dex, now)

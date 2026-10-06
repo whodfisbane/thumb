@@ -63,6 +63,7 @@ dependencies {
     implementation("com.android.tools.build:apksig:9.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    testImplementation("junit:junit:4.13.2")
 }
 
 // ---- THUMB runtime: bundled as assets, copied into every patched APK ----
@@ -119,6 +120,8 @@ val buildOverlayDex by tasks.registering {
         val classFiles = classes.walkTopDown().filter { it.extension == "class" }.map { it.path }.toList()
         run(d8.path, "--min-api", "21", "--release", "--lib", androidJar.path, "--output", dexOut.path, *classFiles.toTypedArray())
         File(dexOut, "classes.dex").copyTo(runtimeAssets.file("overlay.dex").asFile, overwrite = true)
+        // Menu button icon (assets/runtime is generated, so copy it in here too).
+        File(repoRoot, "docs/branding/thumb-menu-icon.png").copyTo(runtimeAssets.file("icon.png").asFile, overwrite = true)
     }
 }
 bundleThumbRuntime { finalizedBy(buildOverlayDex) }

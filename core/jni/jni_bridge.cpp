@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "compat.h"
 #include "cpu/cpu.h"
 #include "memory/arena.h"
 #include "thunks/libc_internal.h"
@@ -320,7 +321,8 @@ void call_slot(GuestThread& t) {
     jvalue result = invoke(env, Target, Ret, obj, cls, mid, a.data());
     sync_pinned_to_guest(env);
     if constexpr (Target == 'i' && Ret == 'L') {
-        if (mi->name == "getFileDescriptor" && mi->sig == "()Ljava/io/FileDescriptor;") position_asset_fd(env, obj, result.l);
+        if (compat::legacy_fs && mi->name == "getFileDescriptor" && mi->sig == "()Ljava/io/FileDescriptor;")
+            position_asset_fd(env, obj, result.l);
     }
     if (log_level() <= LogLevel::Debug) {
         std::string args;

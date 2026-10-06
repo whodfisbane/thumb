@@ -127,11 +127,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val outDir = File(context.cacheDir, "patched").apply { deleteRecursively(); mkdirs() }
                 var libCount = 0
                 var target: Pair<Int?, Int?>? = null
-                val overlayDex = if (options.overlay) context.assets.open("runtime/overlay.dex").readBytes() else null
+                val overlayDex = if (options.needsOverlayCode) context.assets.open("runtime/overlay.dex").readBytes() else null
+                val icon = if (options.overlay) context.assets.open("runtime/icon.png").readBytes() else null
                 raw("options: ${options.toJson().replace("\n", " ")}")
                 val unsigned = analyzed.bundle.apks.mapIndexed { i, apk ->
                     val out = File(outDir, "$i-unsigned.apk")
-                    val extras = if (i == 0) Patcher.BaseExtras(overlayDex, options.toJson()) else null
+                    val extras = if (i == 0) Patcher.BaseExtras(overlayDex, options.toJson(), icon, options.removedPermissions()) else null
                     val result = Patcher(runtime, stub).patch(apk, out, extras) { raw("patch: $it") }
                     libCount += result.libs.size
                     if (result.newTargetSdk != null) target = result.oldTargetSdk to result.newTargetSdk

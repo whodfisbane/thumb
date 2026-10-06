@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "compat.h"
 #include "thunks/libc_internal.h"
 #include "thunks/thunks.h"
 
@@ -540,7 +541,7 @@ void t_opendir(GuestThread& t) {
     errno = 0;
     auto* gd = new GuestDir();
     gd->host = ::opendir(p.c_str());
-    if (!gd->host && errno == EACCES) {
+    if (!gd->host && errno == EACCES && compat::legacy_fs) {
         gd->virt = virtual_listing(p);
         if (!gd->virt.empty()) {
             errno = 0;

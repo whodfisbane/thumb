@@ -5,6 +5,7 @@
 #include <string>
 
 #include "common.h"
+#include "compat.h"
 #include "jni/jni_bridge.h"
 #include "thunks/timescale.h"
 
@@ -64,7 +65,8 @@ void thumb_start_overlay(JNIEnv* env) {
         return compact.compare(at + k.size(), 4, "true") == 0;
     };
     h32::jni::set_ad_block(flag("adblock", true));
-    if (!flag("overlay", false)) {
+    h32::compat::legacy_fs = flag("legacy_fs", true);
+    if (!flag("overlay", false) && !flag("show_fps", false)) {
         env->PopLocalFrame(nullptr);
         return;
     }
