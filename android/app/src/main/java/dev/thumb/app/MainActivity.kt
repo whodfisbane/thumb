@@ -378,7 +378,6 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     SectionDivider()
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
-    OptionRow("Show FPS", "Always-on frames-per-second counter", options.showFps, { onChange(options.copy(showFps = it)) })
     OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) },
         info = P.WARN_SANDBOX)
     OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
@@ -387,7 +386,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     SectionDivider()
     Text("THUMB overlay", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
     OptionRow("In-game menu", "Floating THUMB button with the mods below", options.overlay, { onChange(options.copy(overlay = it)) }, info = P.INFO_OVERLAY)
-    OptionRow("FPS counter", "Frames per second in the menu", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
+    OptionRow("FPS counter", "In the menu, plus an optional on-screen counter", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, {
         if (it) ask("Include the speed slider?", P.WARN_SPEED) { onChange(options.copy(speed = true)) } else onChange(options.copy(speed = false))
@@ -401,7 +400,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
         enabled = options.overlay, indent = true)
     OptionRow("Fullscreen", "Hide the status and navigation bars", options.fullscreen, { onChange(options.copy(fullscreen = it)) },
         enabled = options.overlay, indent = true)
-    OptionRow("Ad-block toggle", "Switch ad blocking while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
+    OptionRow("Ad-block toggle", "Switch ad blocking while playing (starts as set above)", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
         enabled = options.overlay, indent = true)
     Text("Hide and Restart are always in the menu.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 18.dp))
 }

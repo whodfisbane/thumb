@@ -8,8 +8,6 @@ data class PatchOptions(
     // ---- Build options (apply with or without the overlay) ----
     /** Block calls to known ad SDKs from the start. */
     val adblock: Boolean = true,
-    /** Always-on FPS counter in a corner. */
-    val showFps: Boolean = false,
     /**
      * Compat shims for behaviour modern Android changed (virtual /, positioned
      * asset files). Always on in the UI: they only act where the app would
@@ -31,13 +29,12 @@ data class PatchOptions(
     val rotation: Boolean = true,
     val fullscreen: Boolean = true,
 ) {
-    /** The overlay dex is needed for the menu or for the FPS badge. */
-    val needsOverlayCode get() = overlay || showFps
+    /** The overlay dex is only needed for the menu. */
+    val needsOverlayCode get() = overlay
 
     fun toJson(): String = org.json.JSONObject().apply {
         put("version", 1)
         put("adblock", adblock)
-        put("show_fps", showFps)
         put("legacy_fs", legacyFs)
         put("overlay", overlay)
         put("mods", org.json.JSONObject().apply {
@@ -73,7 +70,6 @@ data class PatchOptions(
             "drag it anywhere, or hide it with a three-finger double tap."
         const val INFO_LEGACY_FS = "Recommended. Old apps expect things modern Android changed: browsing from \"/\", " +
             "asset files positioned for them, and so on. THUMB quietly provides the old behaviour."
-        const val INFO_SHOW_FPS = "A small frames-per-second counter in the corner, without the menu."
         const val WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play."
         const val WARN_FPS_UNLOCK = "Many older games tie their game speed to the frame rate. Unlocking FPS may make the game run too fast, " +
             "break physics or animations, or drain more battery. If the game speeds up, use the speed slider to bring it back to 1×."

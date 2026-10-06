@@ -68,7 +68,8 @@ public final class ThumbOverlay {
 
     private static SharedPreferences prefs;
     private static Application app;
-    private static boolean menuEnabled, showFps;
+    private static boolean menuEnabled;
+    private static boolean adblockDefault = true; // the "Block ads" build option
     private static boolean modFps, modSpeed, modFpsUnlock, modAdblock, modScreenOn, modRotation, modFullscreen;
     private static Bitmap icon;
     private static final WeakHashMap<Activity, View> buttons = new WeakHashMap<>();
@@ -87,7 +88,7 @@ public final class ThumbOverlay {
             options = new JSONObject();
         }
         menuEnabled = options.optBoolean("overlay", false);
-        showFps = options.optBoolean("show_fps", false);
+        adblockDefault = options.optBoolean("adblock", true);
         JSONObject mods = options.optJSONObject("mods");
         if (mods == null) mods = new JSONObject();
         modFps = mods.optBoolean("fps_counter");
@@ -159,21 +160,7 @@ public final class ThumbOverlay {
         if (modRotation) applyRotation(a, prefs.getInt("rotation", 0));
         if (modFullscreen) applyFullscreen(a, prefs.getBoolean("fullscreen", false));
 
-        if (showFps && !badges.containsKey(a)) {
-            TextView badge = new TextView(a);
-            badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            badge.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-            badge.setTextColor(MINT);
-            badge.setBackgroundColor(0x99000000);
-            int p = dp(a, 4);
-            badge.setPadding(p * 2, p, p * 2, p);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-            lp.topMargin = dp(a, 28);
-            lp.rightMargin = dp(a, 8);
-            decor.addView(badge, lp);
-            badges.put(a, badge);
-        }
+        if (modFps && prefs.getBoolean("fps_badge", false)) addBadge(a, decor);
 
         if (!menuEnabled || buttons.containsKey(a)) return;
         hookGestures(a, w);
@@ -204,6 +191,33 @@ public final class ThumbOverlay {
         makeDraggable(a, button);
         decor.addView(button, lp);
         buttons.put(a, button);
+    }
+
+    /** The on-screen FPS counter (top right). */
+    private static void addBadge(Activity a, ViewGroup decor) {
+        if (badges.containsKey(a)) return;
+        TextView badge = new TextView(a);
+        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        badge.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        badge.setTextColor(MINT);
+        badge.setBackgroundColor(0x99000000);
+        int p = dp(a, 4);
+        badge.setPadding(p * 2, p, p * 2, p);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        lp.topMargin = dp(a, 28);
+        lp.rightMargin = dp(a, 8);
+        decor.addView(badge, lp);
+        badges.put(a, badge);
+    }
+
+    private static void setBadge(Activity a, boolean on) {
+        if (on) {
+            addBadge(a, (ViewGroup) a.getWindow().getDecorView());
+        } else {
+            TextView b = badges.remove(a);
+            if (b != null && b.getParent() instanceof ViewGroup) ((ViewGroup) b.getParent()).removeView(b);
+        }
     }
 
     /** Drag to move; a tap without movement opens the menu. */
@@ -266,13 +280,14 @@ public final class ThumbOverlay {
                     if (fps.isAttachedToWindow()) main.postDelayed(this, 500);
                 }
             }, 300);
+            panel.addView(toggle(a, "Show FPS on screen", "fps_badge", false, null, null, on -> setBadge(a, on)));
         }
 
         if (modSpeed) addSpeed(a, panel);
 
         if (modFpsUnlock) panel.addView(toggle(a, "Unlock FPS (high refresh rate)", "fps_unlock", false, "Unlock FPS?", WARN_FPS_UNLOCK,
             on -> applyFpsUnlock(a, on)));
-        if (modAdblock) panel.addView(toggle(a, "Block ads", "adblock", true, null, null, ThumbOverlay::nativeSetAdBlock));
+        if (modAdblock) panel.addView(toggle(a, "Block ads", "adblock", adblockDefault, null, null, ThumbOverlay::nativeSetAdBlock));
         if (modScreenOn) panel.addView(toggle(a, "Keep screen on", "screen_on", false, null, null, on -> applyScreenOn(a, on)));
         if (modFullscreen) panel.addView(toggle(a, "Fullscreen (hide system bars)", "fullscreen", false, null, null,
             on -> applyFullscreen(a, on)));

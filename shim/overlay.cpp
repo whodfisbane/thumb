@@ -66,7 +66,7 @@ void thumb_start_overlay(JNIEnv* env) {
     };
     h32::jni::set_ad_block(flag("adblock", true));
     h32::compat::legacy_fs = flag("legacy_fs", true);
-    if (!flag("overlay", false) && !flag("show_fps", false)) {
+    if (!flag("overlay", false)) {
         env->PopLocalFrame(nullptr);
         return;
     }
