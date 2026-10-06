@@ -293,11 +293,9 @@ public final class ThumbOverlay {
         final AlertDialog dialog = new AlertDialog.Builder(a).setView(scroll).create();
 
         // Bottom: HIDE / CLOSE on the left, FORCE RESTART / KILL (for frozen apps) on the right.
-        TextView warn = text(a, "⚠️ Force restart and Kill close the app without saving. Use them only if it's frozen or misbehaving.", 12, 0xFFFFC107);
-        warn.setPadding(0, dp(a, 12), 0, 0);
-        panel.addView(warn);
         TextView hide = button(a, "HIDE");
         hide.setOnClickListener(v -> { setHidden(a, true); dialog.dismiss(); });
+        hide.setPadding(hide.getPaddingLeft(), dp(a, 14), hide.getPaddingRight(), hide.getPaddingBottom());
         TextView close = button(a, "CLOSE");
         close.setOnClickListener(v -> dialog.dismiss());
         TextView restart = button(a, "FORCE RESTART");
