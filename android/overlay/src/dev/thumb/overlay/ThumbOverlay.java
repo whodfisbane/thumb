@@ -295,7 +295,6 @@ public final class ThumbOverlay {
         // Bottom: HIDE / CLOSE on the left, FORCE RESTART / KILL (for frozen apps) on the right.
         TextView hide = button(a, "HIDE");
         hide.setOnClickListener(v -> { setHidden(a, true); dialog.dismiss(); });
-        hide.setPadding(hide.getPaddingLeft(), dp(a, 14), hide.getPaddingRight(), hide.getPaddingBottom());
         TextView close = button(a, "CLOSE");
         close.setOnClickListener(v -> dialog.dismiss());
         TextView restart = button(a, "FORCE RESTART");
@@ -313,7 +312,9 @@ public final class ThumbOverlay {
             .setPositiveButton("Kill", (d, w) -> killApp(a))
             .setNegativeButton("Cancel", null)
             .show());
-        panel.addView(buttonRow(a, hide, restart));
+        LinearLayout top = buttonRow(a, hide, restart);
+        top.setPadding(0, dp(a, 8), 0, 0);
+        panel.addView(top);
         panel.addView(buttonRow(a, close, kill));
 
         dialog.show();
