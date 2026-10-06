@@ -42,7 +42,9 @@ Where we are (2026-10-06): the translator runs **Worms 3 fully playable on a Pix
 A floating button inside every patched app (no overlay permission needed: it lives in
 the app's own window). The repackager adds a small `classes-thumb.dex` for the UI.
 
-- [ ] Floating button + panel; **three-finger tap** hides/unhides it (gesture not passed to the game)
+- [ ] Floating button + panel; **three-finger double tap** (two taps within ~400 ms) hides/unhides it,
+      so games played with three fingers don't trigger it. The gesture is configurable per app
+      (e.g. four-finger double tap, or off), and gestures THUMB consumes are not passed to the game
 - [ ] FPS counter
 - [ ] **FPS unlock** (90/120 Hz), shown with this warning on first enable:
       > ⚠️ Many older games tie their game speed to the frame rate. Unlocking FPS may make
