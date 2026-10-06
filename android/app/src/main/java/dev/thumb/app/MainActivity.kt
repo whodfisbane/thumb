@@ -410,23 +410,6 @@ private fun FpsRow(mode: String, onChange: (String) -> Unit) {
 @Composable
 private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
     val P = dev.thumb.app.core.PatchOptions
-    // Only the two options that change how a game behaves ask for confirmation.
-    var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
-    var confirmText by remember { mutableStateOf("") }
-    confirm?.let { (title, accept) ->
-        AlertDialog(
-            onDismissRequest = { confirm = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            title = { Text(title, fontWeight = FontWeight.Bold) },
-            text = { Text(confirmText, color = Muted) },
-            confirmButton = { TTextButton(onClick = { confirm = null; accept() }) { Text(label("Include")) } },
-            dismissButton = { TTextButton(onClick = { confirm = null }) { Text(label("Cancel"), color = Muted) } },
-        )
-    }
-    fun ask(title: String, text: String, accept: () -> Unit) {
-        confirmText = text
-        confirm = title to accept
-    }
 
     SectionDivider()
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
@@ -439,24 +422,8 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
 
     SectionDivider()
     Text("THUMB overlay", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
-    OptionRow("In-game menu", "Floating THUMB button with the mods below", options.overlay, { onChange(options.copy(overlay = it)) }, info = P.INFO_OVERLAY)
-    OptionRow("FPS counter", "In the menu, plus an optional on-screen counter", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
-        enabled = options.overlay, indent = true)
-    OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, {
-        if (it) ask("Include the speed slider?", P.WARN_SPEED) { onChange(options.copy(speed = true)) } else onChange(options.copy(speed = false))
-    }, P.WARN_SPEED, enabled = options.overlay, indent = true)
-    OptionRow("FPS unlock", "Toggle + slider (30 to max) while playing", options.fpsUnlock, {
-        if (it) ask("Include FPS unlock?", P.WARN_FPS_HIGH) { onChange(options.copy(fpsUnlock = true)) } else onChange(options.copy(fpsUnlock = false))
-    }, P.WARN_FPS_HIGH, enabled = options.overlay, indent = true)
-    OptionRow("Keep screen on", "For reading, loading screens, idle games", options.keepScreenOn, { onChange(options.copy(keepScreenOn = it)) },
-        enabled = options.overlay, indent = true)
-    OptionRow("Rotation lock", "Auto, landscape or portrait", options.rotation, { onChange(options.copy(rotation = it)) },
-        enabled = options.overlay, indent = true)
-    OptionRow("Fullscreen", "Default (as the app wants), on or off while playing", options.fullscreenToggle, { onChange(options.copy(fullscreenToggle = it)) },
-        enabled = options.overlay, indent = true)
-    OptionRow("Ad-block toggle", "Switch ad blocking while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
-        enabled = options.overlay, indent = true)
-    Text("Hide and Restart are always in the menu.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 18.dp))
+    OptionRow("In-game menu", "FPS counter, speed, FPS unlock, ad-block and more, while playing", options.overlay,
+        { onChange(options.copy(overlay = it)) }, info = P.INFO_OVERLAY)
 }
 
 @Composable

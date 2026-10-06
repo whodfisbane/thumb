@@ -61,7 +61,7 @@ public final class ThumbOverlay {
     private static final int PANEL = 0xEE121614;
     private static final int MUTED = 0xFF9AA8A2;
     private static final float[] SPEEDS = {0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f};
-    private static final String[] ROTATIONS = {"Auto", "Landscape", "Portrait"};
+    private static final String[] ROTATIONS = {"Default", "Landscape", "Portrait"};
     private static final String[] FULLSCREENS = {"Default", "On", "Off"};
     // The FPS build option: "compat" (60 FPS) or "default" (the screen decides).
     private static String fpsModeDefault = "compat";
@@ -433,7 +433,7 @@ public final class ThumbOverlay {
             apply.run();
         });
         panel.addView(label);
-        panel.addView(text(a, "Tap to switch: Auto → Landscape → Portrait", 12, MUTED));
+        panel.addView(text(a, "Tap to switch: Default (as the app wants) → Landscape → Portrait", 12, MUTED));
     }
 
     private static void addFullscreen(final Activity a, LinearLayout panel) {
@@ -522,12 +522,21 @@ public final class ThumbOverlay {
         else a.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
+    /** Each screen's own orientation before THUMB changed it, for "Default". */
+    private static final WeakHashMap<Activity, Integer> originalOrientation = new WeakHashMap<>();
+
+    /** Rotation: 0 = Default (the app's own choice), 1 = landscape, 2 = portrait (both follow the sensor). */
     private static void applyRotation(Activity a, int choice) {
-        if (choice == 0 && !prefs.contains("rotation")) return; // never touched: leave the app's own setting
-        int o = choice == 1 ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            : choice == 2 ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-            : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
-        a.setRequestedOrientation(o);
+        Integer original = originalOrientation.get(a);
+        if (choice == 0) {
+            if (original == null) return; // never touched: nothing to undo
+            originalOrientation.remove(a);
+            a.setRequestedOrientation(original);
+            return;
+        }
+        if (original == null) originalOrientation.put(a, a.getRequestedOrientation());
+        a.setRequestedOrientation(choice == 1 ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
     }
 
     /** The system-bar state each screen had before THUMB changed it, for "Default". */

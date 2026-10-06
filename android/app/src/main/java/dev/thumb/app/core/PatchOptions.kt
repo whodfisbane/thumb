@@ -22,16 +22,8 @@ data class PatchOptions(
     val blockInternet: Boolean = false,
 
     // ---- THUMB overlay (in-game menu) and its mods ----
+    /** The in-game menu, with every mod (each starts neutral: the app's own behaviour). */
     val overlay: Boolean = true,
-    val fpsCounter: Boolean = true,
-    val speed: Boolean = false,
-    /** Menu mod: FPS unlock toggle with a 30..max slider. */
-    val fpsUnlock: Boolean = true,
-    val adblockToggle: Boolean = false,
-    val keepScreenOn: Boolean = true,
-    val rotation: Boolean = true,
-    /** Menu mod: fullscreen Default (the app decides) / On / Off while playing. */
-    val fullscreenToggle: Boolean = true,
 ) {
     fun toJson(): String = org.json.JSONObject().apply {
         put("version", 1)
@@ -39,14 +31,9 @@ data class PatchOptions(
         put("fps_mode", fpsMode)
         put("legacy_fs", legacyFs)
         put("overlay", overlay)
+        // The menu always has every mod; "mods" stays so the runtime format can grow per-mod switches again.
         put("mods", org.json.JSONObject().apply {
-            put("fps_counter", overlay && fpsCounter)
-            put("speed", overlay && speed)
-            put("fps_unlock", overlay && fpsUnlock)
-            put("adblock", overlay && adblockToggle)
-            put("keep_screen_on", overlay && keepScreenOn)
-            put("rotation", overlay && rotation)
-            put("fullscreen", overlay && fullscreenToggle)
+            for (m in listOf("fps_counter", "speed", "fps_unlock", "adblock", "keep_screen_on", "rotation", "fullscreen")) put(m, overlay)
         })
     }.toString(2)
 
@@ -68,8 +55,16 @@ data class PatchOptions(
             "android.permission.USE_CREDENTIALS", "android.permission.MANAGE_ACCOUNTS", "android.permission.AUTHENTICATE_ACCOUNTS",
         )
 
-        const val INFO_OVERLAY = "Adds a floating THUMB button inside the app. It may cover part of the screen; " +
-            "drag it anywhere, or hide it with a three-finger double tap."
+        const val INFO_OVERLAY = "A floating THUMB button inside the app opens a menu with:\n" +
+            "• FPS counter (in the menu or on screen)\n" +
+            "• Speed slider: slow motion or fast-forward\n" +
+            "• FPS unlock: 30 FPS up to your screen's maximum\n" +
+            "• Ad-block on/off\n" +
+            "• Keep screen on\n" +
+            "• Rotation and fullscreen: Default (as the app wants) or forced\n" +
+            "• Hide and Restart app\n\n" +
+            "Everything starts as the app normally behaves; nothing changes until you use it. " +
+            "The button may cover part of the screen: drag it anywhere, or hide it with a three-finger double tap."
         const val INFO_LEGACY_FS = "Recommended. Old apps expect things modern Android changed: browsing from \"/\", " +
             "asset files positioned for them, and so on. THUMB quietly provides the old behaviour."
         const val WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play."
