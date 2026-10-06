@@ -93,6 +93,8 @@ JIT is ~1.6 MB of the ~4 MB runtime), so patched apps work fully offline. Addons
 - [ ] **Legacy Android compatibility shims** (per-app toggles, on by default):
   - [x] virtual listing for folders modern Android hides (`/`, `/storage`, `/storage/emulated`)
         when the real listing is denied, so old file browsers can reach `sdcard`
+  - [x] `AssetFileDescriptor.getFileDescriptor()` returns a descriptor positioned at the asset
+        (old Android behaviour; ScummVM's native port reads without seeking)
   - [ ] map old storage paths (`/mnt/sdcard`, `/sdcard/<app>`) to places the app can use
   - [ ] fake answers for removed system services/APIs as they show up
 

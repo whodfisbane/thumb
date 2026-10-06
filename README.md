@@ -21,8 +21,8 @@ Built gaming-first: the first app it ran was **Worms 3** (`com.worms3.app` 2.1).
 | App | Version | Status | Notes |
 |---|---|---|---|
 | Worms 3 | 2.1 | ✅ Playable | GLES1, Java audio, self-unpacking `libgvradio` |
-| ScummVM (SDL build) | 1.8.1 | ✅ Playable | 7 libraries, SDL 1.2, old-NDK stdio macros; game runs with sound. Launcher menus need repeated taps (under investigation) |
-| ScummVM (native build) | 1.8.1 | ⏳ Not tested | Doctor: 100% |
+| ScummVM (SDL build) | 1.8.1 | ✅ Playable | 7 libraries, SDL 1.2, old-NDK stdio macros. Tested: Lure of the Temptress, with sound. Launcher menus need repeated taps (under investigation) |
+| ScummVM (native build) | 1.8.1 | ✅ Playable | Needed two compat shims: virtual `/` listing, positioned asset descriptors. Tested: Lure of the Temptress |
 | VLC | 2.0.6 | ❌ Not yet | Doctor: 66% (needs GLES2/EGL, more libc, sockets) |
 
 | Milestone | State |

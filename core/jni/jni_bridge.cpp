@@ -1,6 +1,7 @@
 #include "jni/jni_bridge.h"
 
 #include <ffi.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <mutex>
@@ -249,6 +250,28 @@ void put_jvalue(GuestThread& t, char ret, jvalue v) {
     }
 }
 
+// Compat shim (old Android): AssetFileDescriptor.getFileDescriptor() used to
+// hand back a descriptor already positioned at the asset's start, and old
+// apps read from it without seeking. Modern Android shares the APK file's
+// position, so position it explicitly, like the old platform did.
+void position_asset_fd(JNIEnv* env, jobject asset_fd, jobject java_fd) {
+    static jclass afd_cls = static_cast<jclass>(env->NewGlobalRef(env->FindClass("android/content/res/AssetFileDescriptor")));
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (!afd_cls || !asset_fd || !java_fd || !env->IsInstanceOf(asset_fd, afd_cls)) return;
+    static jmethodID start_mid = env->GetMethodID(afd_cls, "getStartOffset", "()J");
+    jclass fd_cls = env->GetObjectClass(java_fd);
+    jfieldID desc = env->GetFieldID(fd_cls, "descriptor", "I");
+    env->DeleteLocalRef(fd_cls);
+    if (env->ExceptionCheck() || !desc || !start_mid) {
+        env->ExceptionClear();
+        return;
+    }
+    jlong start = env->CallLongMethod(asset_fd, start_mid);
+    jint fd = env->GetIntField(java_fd, desc);
+    if (fd >= 0 && ::lseek(fd, off_t(start), SEEK_SET) >= 0)
+        H32_DEBUG("compat: positioned asset fd %d at %lld", fd, (long long)start);
+}
+
 template <char Target, int Form, char Ret>
 void call_slot(GuestThread& t) {
     JNIEnv* env = host_env();
@@ -286,10 +309,30 @@ void call_slot(GuestThread& t) {
         H32_DEBUG("jni: blocked call to %s", mi->name.c_str());
         return put_jvalue(t, Ret, jvalue{});
     }
-    H32_TRACE("jni: call %s%s", mi->name.c_str(), mi->sig.c_str());
     sync_pinned_to_host(env);
     jvalue result = invoke(env, Target, Ret, obj, cls, mid, a.data());
     sync_pinned_to_guest(env);
+    if constexpr (Target == 'i' && Ret == 'L') {
+        if (mi->name == "getFileDescriptor" && mi->sig == "()Ljava/io/FileDescriptor;") position_asset_fd(env, obj, result.l);
+    }
+    if (log_level() <= LogLevel::Debug) {
+        std::string args;
+        for (size_t i = 0; i < a.size(); i++) {
+            char buf[32];
+            switch (mi->args[i]) {
+            case 'J': snprintf(buf, sizeof buf, "%lld", (long long)a[i].j); break;
+            case 'F': snprintf(buf, sizeof buf, "%g", a[i].f); break;
+            case 'D': snprintf(buf, sizeof buf, "%g", a[i].d); break;
+            case 'L': snprintf(buf, sizeof buf, "%p", (void*)a[i].l); break;
+            default: snprintf(buf, sizeof buf, "%d", a[i].i); break;
+            }
+            args += (i ? ", " : "") + std::string(buf);
+        }
+        char ret[32] = "";
+        if (Ret == 'J') snprintf(ret, sizeof ret, " -> %lld", (long long)result.j);
+        else if (Ret == 'I' || Ret == 'Z') snprintf(ret, sizeof ret, " -> %d", Ret == 'I' ? result.i : result.z);
+        H32_DEBUG("jni: %s(%s)%s%s", mi->name.c_str(), args.c_str(), ret, Form == 0 ? "" : Form == 1 ? " [V]" : " [A]");
+    }
     put_jvalue(t, Ret, result);
 }
 
