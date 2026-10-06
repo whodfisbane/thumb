@@ -8,10 +8,8 @@ data class PatchOptions(
     // ---- Build options (apply with or without the overlay) ----
     /** Block calls to known ad SDKs from the start. */
     val adblock: Boolean = true,
-    /** FPS mode from the start: "default" (screen decides), "unlock" (highest refresh), "limit". */
-    val fpsMode: String = "limit",
-    /** Cap used in "limit" mode (0 = no limit). Old games were built for 60. */
-    val fpsLimit: Int = 60,
+    /** FPS from the start: "compat" (60, what old games were built for) or "default" (screen decides). */
+    val fpsMode: String = "compat",
     /**
      * Compat shims for behaviour modern Android changed (virtual /, positioned
      * asset files). Always on in the UI: they only act where the app would
@@ -27,7 +25,8 @@ data class PatchOptions(
     val overlay: Boolean = true,
     val fpsCounter: Boolean = true,
     val speed: Boolean = false,
-    val fpsLimitControl: Boolean = true,
+    /** Menu mod: FPS unlock toggle with a 30..max slider. */
+    val fpsUnlock: Boolean = true,
     val adblockToggle: Boolean = false,
     val keepScreenOn: Boolean = true,
     val rotation: Boolean = true,
@@ -40,13 +39,12 @@ data class PatchOptions(
         put("version", 1)
         put("adblock", adblock)
         put("fps_mode", fpsMode)
-        put("fps_limit", fpsLimit)
         put("legacy_fs", legacyFs)
         put("overlay", overlay)
         put("mods", org.json.JSONObject().apply {
             put("fps_counter", overlay && fpsCounter)
             put("speed", overlay && speed)
-            put("fps_limit", overlay && fpsLimitControl)
+            put("fps_unlock", overlay && fpsUnlock)
             put("adblock", overlay && adblockToggle)
             put("keep_screen_on", overlay && keepScreenOn)
             put("rotation", overlay && rotation)

@@ -181,7 +181,7 @@ private fun ThumbScreen(onToggleHolo: () -> Unit, vm: MainViewModel = viewModel(
             TTextButton(onClick = { consoleOpen = true }) { Text(label(">_ Console"), fontFamily = FontFamily.Monospace, color = Muted) }
         }
         Text(
-            "THUMB v${ctx.versionName()} · free software (GPL-3.0) · patch only apps you own",
+            "THUMB v${ctx.versionName()} · free software (GPL-3.0)",
             color = Muted, fontSize = 11.sp, modifier = Modifier.clickable { aboutOpen = true },
         )
     }
@@ -284,9 +284,39 @@ private fun Steps(steps: List<String>) {
 
 @Composable
 private fun IdleCard(onPick: () -> Unit) = PanelCard {
+    // Before picking: a reminder to patch only apps you own (until "Don't show again").
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("thumb", Context.MODE_PRIVATE) }
+    var ask by remember { mutableStateOf(false) }
+    if (ask) {
+        var dontShow by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { ask = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            title = { Text("Before you add an app") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(rich("⚠️ **Patch only apps you own**, and **never share patched APKs** or game data.", Warn), fontSize = 14.sp)
+                    Text("THUMB contains no code or data from any app or game; you supply your own copy.", color = Muted, fontSize = 13.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { dontShow = !dontShow }) {
+                        androidx.compose.material3.Checkbox(checked = dontShow, onCheckedChange = { dontShow = it })
+                        Text("Don't show again", fontSize = 13.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                TTextButton(onClick = {
+                    if (dontShow) prefs.edit().putBoolean("own_apps_ok", true).apply()
+                    ask = false
+                    onPick()
+                }) { Text(label("Continue")) }
+            },
+            dismissButton = { TTextButton(onClick = { ask = false }) { Text(label("Cancel")) } },
+        )
+    }
     Text("Run old 32-bit apps and games on this phone", fontWeight = FontWeight.Bold, fontSize = 18.sp)
     Text(rich("Pick an APK. THUMB **checks** it, adds its **ARM32 translator**, signs it with **this phone's own key** and **installs** it.", accent()), color = Muted)
-    TButton(onClick = onPick, modifier = Modifier.fillMaxWidth()) { Text(label("Add app"), fontWeight = FontWeight.Bold) }
+    TButton(onClick = { if (prefs.getBoolean("own_apps_ok", false)) onPick() else ask = true }, modifier = Modifier.fillMaxWidth()) { Text(label("Add app"), fontWeight = FontWeight.Bold) }
 }
 
 @Composable
@@ -324,6 +354,7 @@ private fun OptionRow(
                 Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (enabled) Color.White else Muted)
                 Text(description, color = Muted, fontSize = 12.sp)
             }
+            Spacer(Modifier.width(12.dp))
             androidx.compose.material3.Switch(checked = checked && enabled, onCheckedChange = onChange, enabled = enabled)
         }
         if (warning != null && checked && enabled) {
@@ -354,35 +385,18 @@ private fun SectionDivider() {
     }
 }
 
-/** Build option: FPS mode (Default / Unlock / Limit n), warning when it can go above 60. */
+/** Build option: FPS mode, Compat (60) or Default (the screen decides). */
 @Composable
-private fun FpsRow(mode: String, limit: Int, onChange: (String, Int) -> Unit) {
-    var text by remember { mutableStateOf(limit.toString()) }
+private fun FpsRow(mode: String, onChange: (String) -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("FPS", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Text("Default: the screen decides · Unlock: highest refresh rate · Limit: cap it (0 = none)", color = Muted, fontSize = 12.sp)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for ((id, name) in listOf("default" to "Default", "unlock" to "Unlock", "limit" to "Limit")) {
-                androidx.compose.material3.FilterChip(
-                    selected = mode == id,
-                    onClick = { onChange(id, text.toIntOrNull() ?: 0) },
-                    label = { Text(label(name)) },
-                )
-            }
-            if (mode == "limit") {
-                androidx.compose.material3.OutlinedTextField(
-                    value = text,
-                    onValueChange = { new ->
-                        text = new.filter { it.isDigit() }.take(4)
-                        onChange("limit", text.toIntOrNull() ?: 0)
-                    },
-                    singleLine = true,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                    modifier = Modifier.width(76.dp),
-                )
+        Text("Compat: 60 FPS, what old games were built for · Default: the screen decides", color = Muted, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for ((id, name) in listOf("compat" to "Compat (60 FPS)", "default" to "Default")) {
+                androidx.compose.material3.FilterChip(selected = mode == id, onClick = { onChange(id) }, label = { Text(label(name)) })
             }
         }
-        if (mode == "unlock" || (mode == "limit" && (limit == 0 || limit > 60))) {
+        if (mode == "default") {
             var open by remember { mutableStateOf(false) }
             Text(
                 if (open) "⚠️ Warning ▴" else "⚠️ Warning ▾", color = Warn, fontSize = 12.sp, fontWeight = FontWeight.Bold,
@@ -417,7 +431,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     SectionDivider()
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
-    FpsRow(options.fpsMode, options.fpsLimit) { mode, limit -> onChange(options.copy(fpsMode = mode, fpsLimit = limit)) }
+    FpsRow(options.fpsMode) { onChange(options.copy(fpsMode = it)) }
     OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) },
         info = P.WARN_SANDBOX)
     OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
@@ -431,15 +445,16 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, {
         if (it) ask("Include the speed slider?", P.WARN_SPEED) { onChange(options.copy(speed = true)) } else onChange(options.copy(speed = false))
     }, P.WARN_SPEED, enabled = options.overlay, indent = true)
-    OptionRow("FPS control", "Switch Default / Unlock / Limit while playing", options.fpsLimitControl, { onChange(options.copy(fpsLimitControl = it)) },
-        enabled = options.overlay, indent = true)
+    OptionRow("FPS unlock", "Toggle + slider (30 to max) while playing", options.fpsUnlock, {
+        if (it) ask("Include FPS unlock?", P.WARN_FPS_HIGH) { onChange(options.copy(fpsUnlock = true)) } else onChange(options.copy(fpsUnlock = false))
+    }, P.WARN_FPS_HIGH, enabled = options.overlay, indent = true)
     OptionRow("Keep screen on", "For reading, loading screens, idle games", options.keepScreenOn, { onChange(options.copy(keepScreenOn = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Rotation lock", "Auto, landscape or portrait", options.rotation, { onChange(options.copy(rotation = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Fullscreen", "Hide the status and navigation bars", options.fullscreen, { onChange(options.copy(fullscreen = it)) },
         enabled = options.overlay, indent = true)
-    OptionRow("Ad-block toggle", "Switch ad blocking while playing (starts as set above)", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
+    OptionRow("Ad-block toggle", "Switch ad blocking while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
         enabled = options.overlay, indent = true)
     Text("Hide and Restart are always in the menu.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 18.dp))
 }
