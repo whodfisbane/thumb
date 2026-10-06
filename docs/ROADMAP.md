@@ -90,6 +90,11 @@ JIT is ~1.6 MB of the ~4 MB runtime), so patched apps work fully offline. Addons
 - [ ] **LAN multiplayer**: real socket support (32-bit sockaddr/addrinfo/timeval/select
       conversions), with a per-app network setting (none / LAN only / full)
 - [ ] Raise `targetSdkVersion` during patching (Android 14+ refuses installs below 23)
+- [ ] **Legacy Android compatibility shims** (per-app toggles, on by default):
+  - [x] virtual listing for folders modern Android hides (`/`, `/storage`, `/storage/emulated`)
+        when the real listing is denied, so old file browsers can reach `sdcard`
+  - [ ] map old storage paths (`/mnt/sdcard`, `/sdcard/<app>`) to places the app can use
+  - [ ] fake answers for removed system services/APIs as they show up
 
 ## Phase 4: Performance and polish
 

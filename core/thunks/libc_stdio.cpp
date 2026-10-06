@@ -491,60 +491,121 @@ void t_fcntl(GuestThread& t) {
 // Guest DIR* is a guest buffer holding one bionic dirent (280 bytes, same
 // layout as the 64-bit kernel dirent64) for readdir's return value.
 constexpr size_t kDirentSize = 280;
-std::mutex g_dirs_mutex;
-std::unordered_map<gaddr, DIR*> g_dirs;
 
-DIR* host_dir(gaddr g) {
+// A guest DIR: a real host directory, or a virtual listing for folders that
+// modern Android hides from apps (old file browsers start at "/", which
+// SELinux no longer lets apps read).
+struct GuestDir {
+    DIR* host = nullptr;
+    std::vector<std::pair<std::string, uint8_t>> virt;
+    size_t pos = 0;
+};
+std::mutex g_dirs_mutex;
+std::unordered_map<gaddr, GuestDir*> g_dirs;
+
+GuestDir* guest_dir(gaddr g) {
     std::lock_guard lk(g_dirs_mutex);
     auto it = g_dirs.find(g);
     return it == g_dirs.end() ? nullptr : it->second;
 }
 
+// Virtual listing for an unreadable path, or empty if we have none.
+std::vector<std::pair<std::string, uint8_t>> virtual_listing(const std::string& path) {
+    std::vector<std::pair<std::string, uint8_t>> v;
+    auto add_if_dir = [&](const char* name, const std::string& full) {
+        struct stat st;
+        if (::stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) v.emplace_back(name, DT_DIR);
+    };
+    std::string p = path;
+    while (p.size() > 1 && p.back() == '/') p.pop_back();
+    if (p == "/") {
+        add_if_dir("sdcard", "/sdcard");
+        add_if_dir("storage", "/storage");
+    } else if (p == "/storage") {
+        add_if_dir("emulated", "/storage/emulated");
+        add_if_dir("self", "/storage/self");
+    } else if (p == "/storage/emulated") {
+        std::string user = std::to_string(::getuid() / 100000);  // Android user id
+        add_if_dir(user.c_str(), "/storage/emulated/" + user);
+    }
+    if (!v.empty()) {
+        v.insert(v.begin(), {"..", DT_DIR});
+        v.insert(v.begin(), {".", DT_DIR});
+    }
+    return v;
+}
+
 void t_opendir(GuestThread& t) {
     std::string p = map_path(mem().str(t.regs()[0]));
     errno = 0;
-    DIR* d = ::opendir(p.c_str());
+    auto* gd = new GuestDir();
+    gd->host = ::opendir(p.c_str());
+    if (!gd->host && errno == EACCES) {
+        gd->virt = virtual_listing(p);
+        if (!gd->virt.empty()) {
+            errno = 0;
+            H32_DEBUG("opendir(\"%s\"): not readable on modern Android, using a virtual listing", p.c_str());
+        }
+    }
     sync_guest_errno(t);
-    H32_DEBUG("opendir(\"%s\") -> %s", p.c_str(), d ? "ok" : std::strerror(errno));
-    if (!d) return set_ret32(t, 0);
+    H32_DEBUG("opendir(\"%s\") -> %s", p.c_str(), gd->host || !gd->virt.empty() ? "ok" : std::strerror(errno));
+    if (!gd->host && gd->virt.empty()) {
+        delete gd;
+        return set_ret32(t, 0);
+    }
     gaddr g = mem().calloc(1, kDirentSize);
     std::lock_guard lk(g_dirs_mutex);
-    g_dirs[g] = d;
+    g_dirs[g] = gd;
     set_ret32(t, g);
+}
+
+void write_dirent(gaddr g, uint64_t ino, int64_t off, uint8_t type, const char* name) {
+    auto& m = mem();
+    m.write<uint64_t>(g + 0, ino);
+    m.write<int64_t>(g + 8, off);
+    m.write<uint16_t>(g + 16, 280);
+    m.write<uint8_t>(g + 18, type);
+    size_t n = std::min<size_t>(std::strlen(name), 255);
+    std::memcpy(m.ptr<char>(g + 19), name, n);
+    m.ptr<char>(g + 19)[n] = 0;
 }
 
 void t_readdir(GuestThread& t) {
     gaddr g = t.regs()[0];
-    DIR* d = host_dir(g);
-    if (!d) return set_ret32(t, 0);
-    dirent* e = ::readdir(d);
+    GuestDir* gd = guest_dir(g);
+    if (!gd) return set_ret32(t, 0);
+    if (!gd->host) {
+        if (gd->pos >= gd->virt.size()) return set_ret32(t, 0);
+        auto& [name, type] = gd->virt[gd->pos++];
+        write_dirent(g, gd->pos, int64_t(gd->pos), type, name.c_str());
+        return set_ret32(t, g);
+    }
+    dirent* e = ::readdir(gd->host);
     if (!e) return set_ret32(t, 0);
     H32_DEBUG("readdir -> \"%s\" type %u", e->d_name, e->d_type);
-    auto& m = mem();
-    m.write<uint64_t>(g + 0, e->d_ino);
-    m.write<int64_t>(g + 8, e->d_off);
-    m.write<uint16_t>(g + 16, 280);
-    m.write<uint8_t>(g + 18, e->d_type);
-    std::strncpy(m.ptr<char>(g + 19), e->d_name, 255);
-    m.ptr<char>(g + 19)[255] = 0;
+    write_dirent(g, e->d_ino, e->d_off, e->d_type, e->d_name);
     set_ret32(t, g);
 }
 
 void t_rewinddir(GuestThread& t) {
-    if (DIR* d = host_dir(t.regs()[0])) ::rewinddir(d);
+    GuestDir* gd = guest_dir(t.regs()[0]);
+    if (!gd) return;
+    if (gd->host) ::rewinddir(gd->host);
+    gd->pos = 0;
 }
 
 void t_closedir(GuestThread& t) {
     gaddr g = t.regs()[0];
-    DIR* d;
+    GuestDir* gd;
     {
         std::lock_guard lk(g_dirs_mutex);
         auto it = g_dirs.find(g);
         if (it == g_dirs.end()) return set_ret32(t, uint32_t(-1));
-        d = it->second;
+        gd = it->second;
         g_dirs.erase(it);
     }
-    ::closedir(d);
+    if (gd->host) ::closedir(gd->host);
+    delete gd;
     mem().free(g);
     set_ret32(t, 0);
 }
