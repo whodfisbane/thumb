@@ -368,7 +368,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     }
 
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
-    OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) })
+    OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
     OptionRow("Show FPS", "Always-on frames-per-second counter", options.showFps, { onChange(options.copy(showFps = it)) })
     OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) },
         info = P.WARN_SANDBOX)
