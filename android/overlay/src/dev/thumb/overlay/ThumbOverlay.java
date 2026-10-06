@@ -292,9 +292,14 @@ public final class ThumbOverlay {
         scroll.addView(panel);
         final AlertDialog dialog = new AlertDialog.Builder(a).setView(scroll).create();
 
-        // Force restart / kill: for when an old app freezes or misbehaves.
-        LinearLayout force = new LinearLayout(a);
-        force.setPadding(0, dp(a, 8), 0, 0);
+        // Bottom: HIDE / CLOSE on the left, FORCE RESTART / KILL (for frozen apps) on the right.
+        TextView warn = text(a, "⚠️ Force restart and Kill close the app without saving. Use them only if it's frozen or misbehaving.", 12, 0xFFFFC107);
+        warn.setPadding(0, dp(a, 12), 0, 0);
+        panel.addView(warn);
+        TextView hide = button(a, "HIDE");
+        hide.setOnClickListener(v -> { setHidden(a, true); dialog.dismiss(); });
+        TextView close = button(a, "CLOSE");
+        close.setOnClickListener(v -> dialog.dismiss());
         TextView restart = button(a, "FORCE RESTART");
         restart.setOnClickListener(v -> new AlertDialog.Builder(a)
             .setTitle("Force restart the app?")
@@ -302,7 +307,6 @@ public final class ThumbOverlay {
             .setPositiveButton("Restart", (d, w) -> restartApp(a))
             .setNegativeButton("Cancel", null)
             .show());
-        force.addView(restart);
         TextView kill = button(a, "KILL");
         kill.setTextColor(0xFFFF8A80);
         kill.setOnClickListener(v -> new AlertDialog.Builder(a)
@@ -311,17 +315,8 @@ public final class ThumbOverlay {
             .setPositiveButton("Kill", (d, w) -> killApp(a))
             .setNegativeButton("Cancel", null)
             .show());
-        force.addView(kill);
-        panel.addView(force);
-
-        LinearLayout row = new LinearLayout(a);
-        TextView hide = button(a, "HIDE");
-        hide.setOnClickListener(v -> { setHidden(a, true); dialog.dismiss(); });
-        row.addView(hide);
-        TextView close = button(a, "CLOSE");
-        close.setOnClickListener(v -> dialog.dismiss());
-        row.addView(close);
-        panel.addView(row);
+        panel.addView(buttonRow(a, hide, restart));
+        panel.addView(buttonRow(a, close, kill));
 
         dialog.show();
         if (dialog.getWindow() != null) dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
@@ -436,6 +431,17 @@ public final class ThumbOverlay {
         int p = dp(a, 10);
         t.setPadding(p, p, p * 2, p);
         return t;
+    }
+
+    /** A row with [left] at the start and [right] at the end. */
+    private static LinearLayout buttonRow(Activity a, View left, View right) {
+        LinearLayout row = new LinearLayout(a);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(left);
+        View gap = new View(a);
+        row.addView(gap, new LinearLayout.LayoutParams(0, 1, 1f));
+        row.addView(right);
+        return row;
     }
 
     private static String fmt(float s) {
