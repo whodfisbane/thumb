@@ -37,6 +37,30 @@ Where we are (2026-10-06): the translator runs **Worms 3 fully playable on a Pix
 - [ ] Log level, performance overlay (FPS, guest heap, JIT cache, translation time)
 - [ ] Options travel as `assets/thumb.json` inside the patched APK
 
+## Phase 2.5: In-game THUMB menu
+
+A floating button inside every patched app (no overlay permission needed: it lives in
+the app's own window). The repackager adds a small `classes-thumb.dex` for the UI.
+
+- [ ] Floating button + panel; **three-finger tap** hides/unhides it (gesture not passed to the game)
+- [ ] FPS counter
+- [ ] **FPS unlock** (90/120 Hz), shown with this warning on first enable:
+      > ⚠️ Many older games tie their game speed to the frame rate. Unlocking FPS may make
+      > the game run too fast, break physics or animations, or drain more battery.
+      > If the game speeds up, use the speed slider to bring it back to 1×.
+- [ ] **Speed slider** (slow-mo / fast-forward): THUMB scales the guest's clock
+      (`gettimeofday`, `clock_gettime`, `time`, ...)
+- [ ] Ad-block toggle (JNI method block list)
+- [ ] **Dev mode: value editor** (search a value, narrow down, edit or freeze), off by default,
+      shown with this warning every time it is turned on:
+      > ⚠️ Dev mode edits the game's memory directly. Use it only in single-player/offline
+      > games. Editing values can corrupt save files or crash the game, so back up your saves
+      > first. In online games it may break the terms of service, get your account banned,
+      > or spoil the game for other players.
+- [ ] Force texture filtering (via the GLES thunks)
+- [ ] Gamepad → touch mapping for touch-only games
+- [ ] Log / crash viewer
+
 ## Phase 3: Compatibility
 
 - [ ] **THUMB Doctor**: scan an APK and list imports THUMB doesn't implement yet
