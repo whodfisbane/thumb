@@ -1,0 +1,61 @@
+# Builds the translator, runs the guest test suite, and builds the THUMB app.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: "30.0.16248370"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Host dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libboost-dev libffi-dev zlib1g-dev pkg-config
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Android NDK
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "NDK=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Linux harness
+        run: cmake -S . -B build -G Ninja && ninja -C build harness
+
+      - name: Guest test suite
+        run: tools/run-tests.sh
+
+      - name: Android runtime (release, no --dev)
+        run: tools/build-android.sh
+
+      - name: THUMB app (release, unsigned unless signing secrets are set)
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.THUMB_RELEASE_KEYSTORE_B64 }}
+          THUMB_RELEASE_STORE_PASSWORD: ${{ secrets.THUMB_RELEASE_STORE_PASSWORD }}
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export THUMB_RELEASE_KEYSTORE="$RUNNER_TEMP/release.keystore"
+          fi
+          ./gradlew assembleRelease --console=plain
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thumb
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            build-android/libthumb.so
+            build-android/libthumb_stub.so

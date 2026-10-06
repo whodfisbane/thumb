@@ -32,13 +32,15 @@ Built gaming-first: the first app it ran was **Worms 3** (`com.worms3.app` 2.1).
 | Raw syscalls, self-unpacking (packed) libraries, exported `Java_*` natives | ✅ |
 | Android runtime + APK repackaging | ✅ |
 | Playable on a phone | ✅ Worms 3 |
-| THUMB app (import APK/OBB on the phone, per-game options) | ⏳ |
+| THUMB app: import APK/bundle, patch, sign and install on the phone, OBB import | ✅ |
+| Per-app options, in-game menu | ⏳ |
 | More games and apps | ⏳ |
 
 ## Layout
 
 ```
 core/       translator: memory arena, ELF loader, dynarmic CPU, thunks, JNI bridge
+android/    THUMB app (Kotlin/Compose): Doctor, on-phone patching, signing, install, OBB import
 harness/    Linux test runner with a fake JVM
 shim/       Android runtime (libthumb.so) and per-library stub
 tools/      build and code-generation scripts
@@ -54,13 +56,24 @@ cmake -S . -B build -G Ninja && ninja -C build harness
 
 Requires Boost headers and libffi.
 
+## Tests
+
+```sh
+NDK=/path/to/android-ndk tools/run-tests.sh   # ARM32 test libraries run through the harness
+```
+
 ## Building for Android
 
 ```sh
 NDK=/path/to/android-ndk tools/build-android.sh     # -> build-android/libthumb.so, libthumb_stub.so
                                                     #    (--dev: developer conveniences, never release)
-tools/repack.py original.apk patched.apk            # swap 32-bit libs for THUMB, re-sign
+tools/repack.py original.apk patched.apk            # PC-side patching (developers)
+
+cd android && ./gradlew assembleRelease             # the THUMB app (patches apps on the phone)
 ```
+
+The THUMB app bundles the runtime from `build-android/` and the supported-function list
+from `build/harness`, so build both first. Release builds refuse a `--dev` runtime.
 
 ## License
 
