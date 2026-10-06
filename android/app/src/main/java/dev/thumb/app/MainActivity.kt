@@ -346,6 +346,14 @@ private fun OptionRow(
     }
 }
 
+/** A short centred line that separates sections (not edge to edge). */
+@Composable
+private fun SectionDivider() {
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+        androidx.compose.material3.HorizontalDivider(Modifier.fillMaxWidth(0.4f), thickness = 1.dp, color = Muted.copy(alpha = 0.5f))
+    }
+}
+
 @Composable
 private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
     val P = dev.thumb.app.core.PatchOptions
@@ -367,6 +375,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
         confirm = title to accept
     }
 
+    SectionDivider()
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
     OptionRow("Show FPS", "Always-on frames-per-second counter", options.showFps, { onChange(options.copy(showFps = it)) })
@@ -375,7 +384,8 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
         enabled = options.sandbox, indent = true, info = P.WARN_BLOCK_INTERNET)
 
-    Text("THUMB overlay", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent(), modifier = Modifier.padding(top = 8.dp))
+    SectionDivider()
+    Text("THUMB overlay", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
     OptionRow("In-game menu", "Floating THUMB button with the mods below", options.overlay, { onChange(options.copy(overlay = it)) }, info = P.INFO_OVERLAY)
     OptionRow("FPS counter", "Frames per second in the menu", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
         enabled = options.overlay, indent = true)
