@@ -215,16 +215,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Copies an OBB into the app's Android/obb folder under the name Android
-     * expects. Apps allowed to install packages (like THUMB) may write other
-     * apps' OBB folders, the way app stores deliver expansion files.
+     * Gets an OBB to the game. Android doesn't let THUMB write other apps' OBB
+     * folders, so THUMB stores it privately and grants the game read access;
+     * the THUMB runtime inside the game copies it over on first launch.
      */
     fun importObb(s: State.ObbNeeded, uri: Uri) = viewModelScope.launch {
         _state.value = s.copy(status = "Copying the data file…", busy = true)
         try {
-            val target = withContext(Dispatchers.IO) {
-                val dir = ObbFinder.obbDir(s.info.packageName)
-                if (!dir.exists() && !dir.mkdirs()) throw java.io.IOException("cannot create $dir")
+            withContext(Dispatchers.IO) {
+                val pkg = s.info.packageName
+                val dir = dev.thumb.app.core.ObbProvider.store(context, pkg).apply { mkdirs() }
                 val target = File(dir, s.info.obbName)
                 val tmp = File(dir, "${s.info.obbName}.part")
                 val t0 = System.nanoTime()
@@ -233,11 +233,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     tmp.outputStream().use { input.copyTo(it, 1 shl 20) }
                 }
                 if (!tmp.renameTo(target)) throw java.io.IOException("cannot rename to $target")
-                raw("obb copied to ${target.path} (${target.length()} bytes in ${(System.nanoTime() - t0) / 1_000_000} ms)")
-                target
+                raw("obb stored at ${target.path} (${target.length()} bytes in ${(System.nanoTime() - t0) / 1_000_000} ms)")
+                val shared = dev.thumb.app.core.ObbProvider.uri(pkg, target.name)
+                context.grantUriPermission(pkg, shared, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                raw("granted $pkg access to $shared")
             }
-            step("Added the data file (OBB)")
-            _state.value = State.Ready(s.info, "Data file (OBB) added: ${target.name}")
+            step("Prepared the data file (OBB)")
+            _state.value = State.Ready(s.info, "The data file will be moved into ${s.info.label} the first time you open it (takes a few seconds).")
         } catch (e: Exception) {
             android.util.Log.e("THUMB", "OBB import failed", e)
             raw("obb import failed: ${describe(e)}")

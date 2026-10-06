@@ -43,7 +43,7 @@ endif()
 
 # --- Android: runtime + per-library stub ---
 if (ANDROID)
-    add_library(thumb SHARED shim/runtime.cpp)
+    add_library(thumb SHARED shim/runtime.cpp shim/obb_handover.cpp)
     target_link_libraries(thumb PRIVATE host32 dl)
     add_library(thumb_stub SHARED shim/stub.cpp)
     target_link_libraries(thumb_stub PRIVATE log dl)

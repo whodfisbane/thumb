@@ -10,6 +10,13 @@
         android:icon="@mipmap/ic_launcher"
         android:label="THUMB"
         android:theme="@style/Theme.Thumb">
+        <!-- Hands imported OBBs to the game they belong to (see ObbProvider). -->
+        <provider
+            android:name=".core.ObbProvider"
+            android:authorities="dev.thumb.app.obb"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

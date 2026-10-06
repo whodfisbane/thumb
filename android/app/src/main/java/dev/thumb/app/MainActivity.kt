@@ -93,6 +93,13 @@ private val LocalHolo = androidx.compose.runtime.staticCompositionLocalOf { fals
 @Composable
 private fun accent() = if (LocalHolo.current) HoloBlue else Mint
 
+/** The THUMB logo; tinted Holo blue in Holo mode. */
+@Composable
+private fun ThumbLogo(modifier: Modifier, description: String? = null) = Image(
+    painterResource(R.drawable.thumb_logo), description, modifier,
+    colorFilter = if (LocalHolo.current) androidx.compose.ui.graphics.ColorFilter.tint(HoloBlue) else null,
+)
+
 /** Button labels are ALL CAPS in Holo mode, like Android 4.x. */
 @Composable
 private fun label(text: String) = if (LocalHolo.current) text.uppercase() else text
@@ -172,10 +179,7 @@ private fun ThumbScreen(onToggleHolo: () -> Unit, vm: MainViewModel = viewModel(
 private fun Header(onAbout: () -> Unit) {
     val holo = LocalHolo.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Image(
-            painterResource(R.drawable.thumb_logo), contentDescription = "About THUMB",
-            modifier = Modifier.size(56.dp).clickable(onClick = onAbout),
-        )
+        ThumbLogo(Modifier.size(56.dp).clickable(onClick = onAbout), "About THUMB")
         Spacer(Modifier.width(14.dp))
         Column {
             Text("THUMB", color = accent(), fontSize = 30.sp, fontWeight = if (holo) FontWeight.Light else FontWeight.Black, letterSpacing = 2.sp)
@@ -237,7 +241,7 @@ private fun HoloActionBar(onAbout: () -> Unit) {
             Modifier.fillMaxWidth().background(Color(0xFF1F1F1F)).height(56.dp).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Image(painterResource(R.drawable.thumb_logo), "About THUMB", Modifier.size(32.dp).clickable(onClick = onAbout))
+            ThumbLogo(Modifier.size(32.dp).clickable(onClick = onAbout), "About THUMB")
             Spacer(Modifier.width(12.dp))
             Text("THUMB", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Light)
         }
@@ -405,22 +409,36 @@ private fun fullAccessIntent(ctx: Context) =
 @Composable
 private fun ConsoleDialog(lines: List<String>, onClose: () -> Unit) {
     val ctx = LocalContext.current
+    val holo = LocalHolo.current
+    // Holo: a plain grey-on-black terminal under a Holo bar; otherwise a mint terminal.
+    val textColor = if (holo) Color(0xFFD0D0D0) else Mint
+    val panel = if (holo) Ink else Color(0xFF07100C)
+    val shape = if (holo) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(8.dp)
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = Ink) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(">_ THUMB console", color = Mint, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Row(
+                    Modifier.fillMaxWidth().background(if (holo) Color(0xFF1F1F1F) else Ink).padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (holo) "Console" else ">_ THUMB console", color = if (holo) Color.White else Mint,
+                        fontFamily = if (holo) FontFamily.Default else FontFamily.Monospace,
+                        fontWeight = if (holo) FontWeight.Light else FontWeight.Bold,
+                        fontSize = if (holo) 20.sp else 14.sp, modifier = Modifier.weight(1f),
+                    )
                     TTextButton(onClick = {
                         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setPrimaryClip(ClipData.newPlainText("THUMB log", lines.joinToString("\n")))
-                    }) { Text("Copy") }
+                    }) { Text(label("Copy")) }
                     TTextButton(onClick = onClose) { Text(label("Close")) }
                 }
+                if (holo) Spacer(Modifier.fillMaxWidth().height(2.dp).background(HoloBlue))
                 Column(
-                    Modifier.fillMaxSize().background(Color(0xFF07100C), RoundedCornerShape(8.dp)).padding(10.dp)
+                    Modifier.fillMaxSize().padding(if (holo) 0.dp else 12.dp).background(panel, shape).padding(10.dp)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    for (l in lines) Text(l, color = Mint, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    for (l in lines) Text(l, color = textColor, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
                 }
             }
         }
@@ -457,10 +475,7 @@ private fun AboutDialog(onToggleHolo: () -> Unit, onClose: () -> Unit) {
         onDismissRequest = onClose,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         icon = {
-            Image(
-                painterResource(R.drawable.thumb_logo), null,
-                Modifier.size(64.dp).clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { tap() },
-            )
+            ThumbLogo(Modifier.size(64.dp).clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { tap() })
         },
         title = { Text("THUMB v${ctx.versionName()}", fontWeight = if (holo) FontWeight.Light else FontWeight.Bold, color = if (holo) HoloBlue else Color.Unspecified) },
         text = {
