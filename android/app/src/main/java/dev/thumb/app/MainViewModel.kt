@@ -127,7 +127,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val outDir = File(context.cacheDir, "patched").apply { deleteRecursively(); mkdirs() }
                 var libCount = 0
                 var target: Pair<Int?, Int?>? = null
-                val overlayDex = if (options.needsOverlayCode) context.assets.open("runtime/overlay.dex").readBytes() else null
+                // Always added (~18 KB): it also applies build options like fullscreen and the FPS display mode.
+                val overlayDex = context.assets.open("runtime/overlay.dex").readBytes()
                 val icon = if (options.overlay) context.assets.open("runtime/icon.png").readBytes() else null
                 raw("options: ${options.toJson().replace("\n", " ")}")
                 val unsigned = analyzed.bundle.apks.mapIndexed { i, apk ->

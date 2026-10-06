@@ -30,11 +30,9 @@ data class PatchOptions(
     val adblockToggle: Boolean = false,
     val keepScreenOn: Boolean = true,
     val rotation: Boolean = true,
-    val fullscreen: Boolean = true,
+    /** Menu mod: fullscreen Default (the app decides) / On / Off while playing. */
+    val fullscreenToggle: Boolean = true,
 ) {
-    /** The overlay dex is only needed for the menu. */
-    val needsOverlayCode get() = overlay
-
     fun toJson(): String = org.json.JSONObject().apply {
         put("version", 1)
         put("adblock", adblock)
@@ -48,7 +46,7 @@ data class PatchOptions(
             put("adblock", overlay && adblockToggle)
             put("keep_screen_on", overlay && keepScreenOn)
             put("rotation", overlay && rotation)
-            put("fullscreen", overlay && fullscreen)
+            put("fullscreen", overlay && fullscreenToggle)
         })
     }.toString(2)
 

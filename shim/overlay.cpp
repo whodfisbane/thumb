@@ -84,10 +84,6 @@ void thumb_start_overlay(JNIEnv* env) {
         h32::timescale::set_fps_limit(compat ? 60 : 0);
     }
     h32::compat::legacy_fs = flag("legacy_fs", true);
-    if (!flag("overlay", false)) {
-        env->PopLocalFrame(nullptr);
-        return;
-    }
     jclass overlay = env->FindClass("dev/thumb/overlay/ThumbOverlay");
     if (env->ExceptionCheck() || !overlay) {
         env->ExceptionClear();

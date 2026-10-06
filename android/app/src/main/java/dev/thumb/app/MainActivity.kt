@@ -452,7 +452,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
         enabled = options.overlay, indent = true)
     OptionRow("Rotation lock", "Auto, landscape or portrait", options.rotation, { onChange(options.copy(rotation = it)) },
         enabled = options.overlay, indent = true)
-    OptionRow("Fullscreen", "Hide the status and navigation bars", options.fullscreen, { onChange(options.copy(fullscreen = it)) },
+    OptionRow("Fullscreen", "Default (as the app wants), on or off while playing", options.fullscreenToggle, { onChange(options.copy(fullscreenToggle = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Ad-block toggle", "Switch ad blocking while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
         enabled = options.overlay, indent = true)

@@ -62,6 +62,7 @@ public final class ThumbOverlay {
     private static final int MUTED = 0xFF9AA8A2;
     private static final float[] SPEEDS = {0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f};
     private static final String[] ROTATIONS = {"Auto", "Landscape", "Portrait"};
+    private static final String[] FULLSCREENS = {"Default", "On", "Off"};
     // The FPS build option: "compat" (60 FPS) or "default" (the screen decides).
     private static String fpsModeDefault = "compat";
 
@@ -161,7 +162,7 @@ public final class ThumbOverlay {
         applyFps(a, fpsTarget()); // build option, or the menu's FPS unlock
         if (modScreenOn) applyScreenOn(a, prefs.getBoolean("screen_on", false));
         if (modRotation) applyRotation(a, prefs.getInt("rotation", 0));
-        if (modFullscreen) applyFullscreen(a, prefs.getBoolean("fullscreen", false));
+        if (modFullscreen) applyFullscreen(a, prefs.getInt("fullscreen_mode", 0));
 
         if (modFps && prefs.getBoolean("fps_badge", false)) addBadge(a, decor);
 
@@ -291,8 +292,7 @@ public final class ThumbOverlay {
         if (modFpsLimit) addFpsLimit(a, panel);
         if (modAdblock) panel.addView(toggle(a, "Block ads", "adblock", adblockDefault, null, null, ThumbOverlay::nativeSetAdBlock));
         if (modScreenOn) panel.addView(toggle(a, "Keep screen on", "screen_on", false, null, null, on -> applyScreenOn(a, on)));
-        if (modFullscreen) panel.addView(toggle(a, "Fullscreen (hide system bars)", "fullscreen", false, null, null,
-            on -> applyFullscreen(a, on)));
+        if (modFullscreen) addFullscreen(a, panel);
         if (modRotation) addRotation(a, panel);
 
         TextView hint = text(a, "Three-finger double tap hides or shows this button.", 12, MUTED);
@@ -436,6 +436,19 @@ public final class ThumbOverlay {
         panel.addView(text(a, "Tap to switch: Auto → Landscape → Portrait", 12, MUTED));
     }
 
+    private static void addFullscreen(final Activity a, LinearLayout panel) {
+        final TextView label = text(a, "Fullscreen: " + FULLSCREENS[prefs.getInt("fullscreen_mode", 0)], 15, Color.WHITE);
+        label.setPadding(0, dp(a, 10), 0, dp(a, 6));
+        label.setOnClickListener(v -> {
+            int next = (prefs.getInt("fullscreen_mode", 0) + 1) % FULLSCREENS.length;
+            prefs.edit().putInt("fullscreen_mode", next).apply();
+            label.setText("Fullscreen: " + FULLSCREENS[next]);
+            applyFullscreen(a, next);
+        });
+        panel.addView(label);
+        panel.addView(text(a, "Tap to switch: Default (as the app wants) → On → Off", 12, MUTED));
+    }
+
     private static TextView text(Activity a, String s, float sp, int color) {
         TextView t = new TextView(a);
         t.setText(s);
@@ -517,20 +530,41 @@ public final class ThumbOverlay {
         a.setRequestedOrientation(o);
     }
 
-    private static void applyFullscreen(Activity a, boolean on) {
+    /** The system-bar state each screen had before THUMB changed it, for "Default". */
+    private static final WeakHashMap<Activity, Integer> originalBars = new WeakHashMap<>();
+
+    /** Fullscreen mode: 0 = Default (the app's own choice), 1 = On (bars hidden), 2 = Off (bars shown). */
+    private static void applyFullscreen(Activity a, int mode) {
         View decor = a.getWindow().getDecorView();
-        if (Build.VERSION.SDK_INT >= 30) {
-            WindowInsetsController c = decor.getWindowInsetsController();
-            if (c == null) return;
-            if (on) {
-                c.hide(WindowInsets.Type.systemBars());
-                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        Integer original = originalBars.get(a);
+        if (mode == 0) {
+            if (original == null) return; // never touched: nothing to undo
+            originalBars.remove(a);
+            if (Build.VERSION.SDK_INT >= 30) setBars(decor, original == 0);
+            else decor.setSystemUiVisibility(original);
+            return;
+        }
+        if (original == null) {
+            if (Build.VERSION.SDK_INT >= 30) {
+                WindowInsets insets = decor.getRootWindowInsets();
+                originalBars.put(a, insets == null || insets.isVisible(WindowInsets.Type.statusBars()) ? 1 : 0);
             } else {
-                c.show(WindowInsets.Type.systemBars());
+                originalBars.put(a, decor.getSystemUiVisibility());
             }
+        }
+        if (Build.VERSION.SDK_INT >= 30) setBars(decor, mode == 1);
+        else decor.setSystemUiVisibility(mode == 1 ? View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE : 0);
+    }
+
+    private static void setBars(View decor, boolean hide) {
+        WindowInsetsController c = decor.getWindowInsetsController();
+        if (c == null) return;
+        if (hide) {
+            c.hide(WindowInsets.Type.systemBars());
+            c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         } else {
-            decor.setSystemUiVisibility(on ? View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE : 0);
+            c.show(WindowInsets.Type.systemBars());
         }
     }
 
