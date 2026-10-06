@@ -132,6 +132,17 @@ const char* name_of_stub(gaddr a) {
     return it == r.by_stub.end() ? nullptr : r.entries[it->second]->name.c_str();
 }
 
+std::vector<std::string> implemented() {
+    auto& r = reg();
+    std::lock_guard lk(r.m);
+    std::vector<std::string> out;
+    for (Entry* e : r.entries)
+        if (e->fn && e->name.find("::") == std::string::npos) out.push_back(e->name);
+    for (auto& [name, addr] : r.data) out.push_back(name);
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
 void dump_stats(size_t top) {
     auto& r = reg();
     std::vector<std::pair<uint64_t, Entry*>> called;

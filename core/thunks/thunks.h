@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common.h"
 
@@ -31,6 +32,9 @@ void dispatch(GuestThread& t, uint32_t svc);
 const char* name_of(uint32_t svc);
 // Name of the thunk whose stub contains guest address `a`, or nullptr.
 const char* name_of_stub(gaddr a);
+
+// Names of all imports with a real implementation (JNI/VM slots excluded).
+std::vector<std::string> implemented();
 
 // Logs the `top` most-called thunks and every unimplemented import that was hit.
 void dump_stats(size_t top);

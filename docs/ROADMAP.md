@@ -63,8 +63,8 @@ the app's own window). The repackager adds a small `classes-thumb.dex` for the U
 
 ## Phase 3: Compatibility
 
-- [ ] **THUMB Doctor**: scan an APK and list imports THUMB doesn't implement yet
-      ("92% ready, missing: OpenSL ES")
+- [x] **THUMB Doctor** (`tools/thumb-doctor.py`): scan an APK and list imports THUMB doesn't implement yet
+- [ ] THUMB Doctor inside the THUMB app (Kotlin port; supported-function list generated at build time)
 - [ ] Community compatibility list (apps/games, status, notes)
 - [ ] More system APIs: GLES 2/3, EGL, OpenSL ES, AAudio, libandroid (assets, input, window),
       guest `dlopen`/`dlsym` (multi-library and plugin-based engines)

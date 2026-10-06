@@ -136,6 +136,11 @@ int main(int argc, char** argv) {
         if (a == "-v") set_log_level(LogLevel::Debug);
         else if (a == "-vv") set_log_level(LogLevel::Trace);
         else if (a == "--no-block") block = false;
+        else if (a == "--list-thunks") {
+            GuestThread::global_init();
+            for (auto& n : thunks::implemented()) printf("%s\n", n.c_str());
+            return 0;
+        }
         else if (a == "--boot" && i + 1 < argc) boot_frames = atoi(argv[++i]);
         else if (a == "--game" && i + 1 < argc) game_dir = argv[++i];
         else if (a == "--map" && i + 1 < argc) {
