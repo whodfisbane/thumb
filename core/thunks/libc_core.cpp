@@ -263,6 +263,7 @@ void register_libc_core() {
     add("_longjmp", t_longjmp);
 
     add("__gnu_Unwind_Find_exidx", t_find_exidx);
+    add("dl_unwind_find_exidx", t_find_exidx);  // newer NDK name, same signature
     add("system", t_system);
     add("syscall", t_syscall);
     add("qsort", t_qsort);

@@ -34,6 +34,19 @@ void t_log_vprint(GuestThread& t) {
     emit_log(int32_t(t.regs()[0]), mem().str(t.regs()[1]), guest_format(mem().str(t.regs()[2]), va));
     set_ret32(t, 1);
 }
+// void android_set_abort_message(const char* msg): shown before abort()
+void t_set_abort_message(GuestThread& t) {
+    H32_ERROR("guest abort message: %s", mem().str(t.regs()[0]) ?: "(null)");
+}
+
+// void syslog(int prio, const char* fmt, ...)
+void t_syslog(GuestThread& t) {
+    ArgCursor c{t, 2};
+    VarArgs va(c);
+    emit_log(6 /* ERROR */, "guest syslog", guest_format(mem().str(t.regs()[1]), va));
+}
+void t_nop(GuestThread&) {}
+
 void t_log_write(GuestThread& t) {
     emit_log(int32_t(t.regs()[0]), mem().str(t.regs()[1]), mem().str(t.regs()[2]) ?: "");
     set_ret32(t, 1);
@@ -119,6 +132,10 @@ namespace thunks {
 
 void register_android() {
     add("__android_log_assert", t_log_assert);
+    add("android_set_abort_message", t_set_abort_message);
+    add("syslog", t_syslog);
+    add("openlog", t_nop);
+    add("closelog", t_nop);
     add("__android_log_print", t_log_print);
     add("__android_log_vprint", t_log_vprint);
     add("__android_log_write", t_log_write);

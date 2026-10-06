@@ -9,25 +9,29 @@ Where we are (2026-10-06): the translator runs **Worms 3 fully playable on a Pix
 - [x] License: GPL-3.0 (`LICENSE`), third-party notices (`THIRD_PARTY_NOTICES.md`)
 - [x] README credits: "built with Claude Opus 5.5", plus a note on AI-assisted code
 - [x] OBB dev-fetch is compiled in only with `tools/build-android.sh --dev` (off by default)
-- [ ] Tests: small ARM32 test libraries (NDK `armeabi-v7a`) exercising libc, setjmp,
-      C++ exceptions, threads, JNI, run through the Linux harness
+- [x] Tests: `tools/run-tests.sh` builds ARM32 test libraries (tests/guest) with the NDK and runs
+      them through the harness: libc, printf/scanf, qsort/bsearch, setjmp, C++ exceptions, threads,
+      semaphores, files/stat/dirent, soft-float ABI, dlopen, raw syscalls, /proc/self/maps (63 checks)
+- [ ] Tests for JNI (needs the fake JVM to drive natives from the test)
 - [ ] GitHub Actions: build the harness and run the tests, build `libthumb.so`, build the THUMB app
 - [ ] Release signing key (kept private) and reproducible release builds
 
 ## Phase 1: THUMB app (no PC needed)
 
-- [ ] Kotlin + Jetpack Compose app, arm64, minimum Android 10
-- [ ] Import an app: pick an `.apk`, or a bundle (`.xapk` / `.apks` / `.apkm`), or choose an installed app
-- [ ] On-device patching: the same steps as `repack.py` (stubs + original libs + `libthumb.so`),
+- [x] Kotlin + Jetpack Compose app, arm64, minimum Android 10
+- [x] Import an app: pick an `.apk`, or a bundle (`.xapk` / `.apks` / `.apkm`)
+- [ ] Choose an already-installed app as the source
+- [x] On-device patching: the same steps as `repack.py` (stubs + original libs + `libthumb.so`),
       handling split APKs (`config.armeabi_v7a`), signed with a per-device THUMB key via apksig
-- [ ] Install through `PackageInstaller` sessions (works for split APKs)
+- [x] Install through `PackageInstaller` sessions (works for split APKs)
 - [ ] OBB handling, automatic where possible:
   - `.xapk` bundles often contain the OBB: import it automatically
   - otherwise an "Add OBB" button with a file picker
   - delivery: THUMB serves the OBB through a content provider protected by a signature
     permission; the patched game's runtime copies it into its own OBB folder on first launch
 - [ ] Library screen: patched apps, status, re-patch after THUMB updates, uninstall
-- [ ] Log viewer for the `thumb` log tag (for bug reports)
+- [x] Console: full raw log with copy button (patching side)
+- [ ] Log viewer for the patched app's `thumb` runtime log
 
 ## Phase 2: Per-app options
 

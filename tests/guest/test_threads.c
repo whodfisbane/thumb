@@ -1,0 +1,65 @@
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include "check.h"
+
+static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+static long counter;
+static void* adder(void* arg) {
+    for (int i = 0; i < 20000; i++) { pthread_mutex_lock(&mu); counter++; pthread_mutex_unlock(&mu); }
+    return (void*)((intptr_t)arg * 2);
+}
+
+static pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
+static int ready;
+static void* signaller(void* arg) {
+    (void)arg;
+    pthread_mutex_lock(&mu); ready = 1; pthread_cond_signal(&cv); pthread_mutex_unlock(&mu);
+    return NULL;
+}
+
+static sem_t sem;
+static void* poster(void* arg) { (void)arg; for (int i = 0; i < 5; i++) sem_post(&sem); return NULL; }
+
+static int once_count;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+static void once_fn(void) { once_count++; }
+
+static pthread_key_t key;
+static int dtor_calls;
+static void key_dtor(void* v) { (void)v; dtor_calls++; }
+static void* keyed(void* arg) { pthread_setspecific(key, arg); return pthread_getspecific(key); }
+
+static void* exiter(void* arg) { (void)arg; pthread_exit((void*)77); return NULL; }
+
+TEST_MAIN({
+    pthread_t t[4];
+    for (intptr_t i = 0; i < 4; i++) pthread_create(&t[i], NULL, adder, (void*)i);
+    intptr_t rets = 0;
+    for (int i = 0; i < 4; i++) { void* r; pthread_join(t[i], &r); rets += (intptr_t)r; }
+    CHECK(counter == 80000, "mutex-protected counter across 4 threads");
+    CHECK(rets == (0 + 1 + 2 + 3) * 2, "pthread_join return values");
+
+    pthread_t s; pthread_create(&s, NULL, signaller, NULL);
+    pthread_mutex_lock(&mu); while (!ready) pthread_cond_wait(&cv, &mu); pthread_mutex_unlock(&mu);
+    pthread_join(s, NULL);
+    CHECK(ready == 1, "condition variable");
+
+    sem_init(&sem, 0, 0);
+    pthread_t p; pthread_create(&p, NULL, poster, NULL);
+    for (int i = 0; i < 5; i++) sem_wait(&sem);
+    pthread_join(p, NULL);
+    int val = -1; sem_getvalue(&sem, &val);
+    CHECK(val == 0, "semaphore wait/post");
+
+    pthread_once(&once, once_fn); pthread_once(&once, once_fn);
+    CHECK(once_count == 1, "pthread_once");
+
+    pthread_key_create(&key, key_dtor);
+    pthread_t k; void* kr; pthread_create(&k, NULL, keyed, (void*)0x1234); pthread_join(k, &kr);
+    CHECK(kr == (void*)0x1234 && dtor_calls == 1, "thread-specific data + destructor");
+
+    pthread_t e; void* er; pthread_create(&e, NULL, exiter, NULL); pthread_join(e, &er);
+    CHECK(er == (void*)77, "pthread_exit value");
+})
