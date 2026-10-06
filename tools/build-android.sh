@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Cross-compiles the translator for arm64 Android.
-#   NDK=/path/to/android-ndk tools/build-android.sh
+#   NDK=/path/to/android-ndk tools/build-android.sh [--dev]
 # Output: build-android/libthumb.so and build-android/libthumb_stub.so
+#   --dev  enable developer conveniences (OBB fetch over adb reverse). Never release these.
 set -euo pipefail
+DEV=OFF
+[ "${1:-}" = "--dev" ] && DEV=ON
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NDK=${NDK:-/home/powmy/android-sdk/android-ndk-r30}
 API=29
@@ -34,6 +37,7 @@ cmake -S "$ROOT" -B "$OUT" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-$API \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DTHUMB_DEV_OBB_FETCH=$DEV \
     -DCMAKE_CXX_FLAGS="-include cstdlib" \
     -DCMAKE_FIND_ROOT_PATH="$DEPS" -DBOOST_ROOT="$DEPS" -DBoost_INCLUDE_DIR="$DEPS/include" >/dev/null
 ninja -C "$OUT" thumb thumb_stub

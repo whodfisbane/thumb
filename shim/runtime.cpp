@@ -22,6 +22,9 @@ extern "C" __attribute__((visibility("default"))) jint thumb_load(JavaVM* vm, co
     std::lock_guard lk(m);
 
     H32_INFO("thumb_load(%s/%s)", dir, guest_name);
+#ifdef THUMB_DEV_OBB_FETCH
+    H32_WARN("DEV BUILD: OBB fetch from 127.0.0.1:47070 is enabled; do not distribute this build");
+#endif
     GuestThread::global_init();
     jni::init(vm);
 

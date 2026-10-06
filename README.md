@@ -47,5 +47,22 @@ Requires Boost headers and libffi.
 
 ```sh
 NDK=/path/to/android-ndk tools/build-android.sh     # -> build-android/libthumb.so, libthumb_stub.so
+                                                    #    (--dev: developer conveniences, never release)
 tools/repack.py original.apk patched.apk            # swap 32-bit libs for THUMB, re-sign
 ```
+
+## License
+
+THUMB is free software under the **GNU General Public License v3.0** (see [`LICENSE`](LICENSE)).
+Bundled third-party components and their licenses are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+Patch only apps you own. Never redistribute patched APKs or game data: THUMB ships the translator, not anyone's app.
+
+## Credits
+
+THUMB was designed and written with **Claude Opus 5.5** (Anthropic) as a pair programmer;
+commits carry a `Co-Authored-By` line. The legal status of copyright in AI-assisted code
+is still unsettled in some jurisdictions; the GPL-3.0 license applies to the extent the
+code is copyrightable.
+
+The JIT is [dynarmic](https://github.com/azahar-emu/dynarmic) by merryhime and contributors.

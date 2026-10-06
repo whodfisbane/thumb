@@ -1,7 +1,7 @@
 // <stdio.h>, file system calls, directories.
 #include <dirent.h>
 #include <fcntl.h>
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && defined(THUMB_DEV_OBB_FETCH)
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -34,10 +34,12 @@ void add_path_mapping(const std::string& guest_prefix, const std::string& host_p
     H32_INFO("path map: %s -> %s", guest_prefix.c_str(), host_prefix.c_str());
 }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && defined(THUMB_DEV_OBB_FETCH)
 namespace {
 
-// Developer convenience: if a file under Android/obb/ is missing, fetch it
+// DEV BUILDS ONLY (THUMB_DEV_OBB_FETCH): any app on the device could listen on
+// this port, so release builds must never contain this.
+// If a file under Android/obb/ is missing, fetch it
 // once from http://127.0.0.1:47070/<name>. With `adb reverse tcp:47070
 // tcp:47070` that port tunnels to a PC serving the OBB, which avoids having
 // to copy it into another user's protected storage by hand.
@@ -129,7 +131,7 @@ std::string map_path(const char* p) {
         for (auto& [from, to] : g_path_map)
             if (s.compare(0, from.size(), from) == 0) return to + s.substr(from.size());
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && defined(THUMB_DEV_OBB_FETCH)
     maybe_fetch_obb(s);
 #endif
     return s;

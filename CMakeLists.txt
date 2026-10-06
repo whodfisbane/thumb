@@ -8,6 +8,8 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+option(THUMB_DEV_OBB_FETCH "DEV ONLY: fetch missing OBBs from 127.0.0.1:47070 (never enable in releases)" OFF)
+
 # --- dynarmic (ARM32 JIT) ---
 set(DYNARMIC_TESTS OFF CACHE BOOL "" FORCE)
 set(DYNARMIC_FRONTENDS "A32" CACHE STRING "" FORCE)
@@ -35,6 +37,9 @@ else()
     target_compile_definitions(host32 PUBLIC H32_HOST_LINUX=1)
 endif()
 target_compile_options(host32 PRIVATE -Wall -Wextra -Wno-unused-parameter)
+if (THUMB_DEV_OBB_FETCH)
+    target_compile_definitions(host32 PUBLIC THUMB_DEV_OBB_FETCH=1)
+endif()
 
 # --- Android: runtime + per-library stub ---
 if (ANDROID)

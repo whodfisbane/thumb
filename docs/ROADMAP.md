@@ -6,10 +6,9 @@ Where we are (2026-10-06): the translator runs **Worms 3 fully playable on a Pix
 
 ## Phase 0: Release-ready open source
 
-- [ ] Pick a license (GPL-3.0 or MIT), add `LICENSE` and third-party notices
-      (dynarmic 0BSD, TLSF BSD, libffi MIT, jni.h Apache-2.0, dynarmic externals)
-- [ ] README credits: "built with Claude Opus 5.5", plus a note on AI-assisted code
-- [ ] Put the OBB dev-fetch (127.0.0.1:47070) behind a debug-only switch; it must never ship enabled
+- [x] License: GPL-3.0 (`LICENSE`), third-party notices (`THIRD_PARTY_NOTICES.md`)
+- [x] README credits: "built with Claude Opus 5.5", plus a note on AI-assisted code
+- [x] OBB dev-fetch is compiled in only with `tools/build-android.sh --dev` (off by default)
 - [ ] Tests: small ARM32 test libraries (NDK `armeabi-v7a`) exercising libc, setjmp,
       C++ exceptions, threads, JNI, run through the Linux harness
 - [ ] GitHub Actions: build the harness and run the tests, build `libthumb.so`, build the THUMB app
