@@ -16,6 +16,28 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    // Release signing: keystore path and passwords come from the environment
+    // (never committed). Without them, the release APK is built unsigned.
+    signingConfigs {
+        System.getenv("THUMB_RELEASE_KEYSTORE")?.let { path ->
+            create("release") {
+                storeFile = file(path)
+                storePassword = System.getenv("THUMB_RELEASE_STORE_PASSWORD")
+                keyAlias = System.getenv("THUMB_RELEASE_KEY_ALIAS") ?: "thumb-release"
+                keyPassword = System.getenv("THUMB_RELEASE_KEY_PASSWORD") ?: System.getenv("THUMB_RELEASE_STORE_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
+    }
+
     buildFeatures { compose = true }
 
     compileOptions {
@@ -73,3 +95,17 @@ val bundleThumbRuntime by tasks.registering {
     }
 }
 tasks.named("preBuild") { dependsOn(bundleThumbRuntime) }
+
+// A release must never ship a developer runtime (tools/build-android.sh --dev),
+// which has the OBB-over-adb shortcut and debug sampling compiled in.
+val checkReleaseRuntime by tasks.registering {
+    dependsOn(bundleThumbRuntime)
+    doLast {
+        val lib = runtimeAssets.file("libthumb.so").asFile
+        val marker = "DEV BUILD".toByteArray()
+        val bytes = lib.readBytes()
+        val dev = (0..bytes.size - marker.size).any { i -> marker.indices.all { bytes[i + it] == marker[it] } }
+        check(!dev) { "libthumb.so is a --dev build: rebuild it with tools/build-android.sh (no --dev) before a release" }
+    }
+}
+afterEvaluate { tasks.named("preReleaseBuild") { dependsOn(checkReleaseRuntime) } }

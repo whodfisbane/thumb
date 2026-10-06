@@ -20,15 +20,20 @@ object Installer {
         data class Failure(val status: Int, val message: String) : Outcome()
     }
 
-    suspend fun install(context: Context, apk: File): Outcome {
+    suspend fun install(context: Context, apk: File): Outcome = install(context, listOf(apk))
+
+    /** Installs a base APK plus its splits in one session. */
+    suspend fun install(context: Context, apks: List<File>): Outcome {
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         if (Build.VERSION.SDK_INT >= 34) params.setRequestUpdateOwnership(false)
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->
-            session.openWrite("base.apk", 0, apk.length()).use { out ->
-                apk.inputStream().use { it.copyTo(out) }
-                session.fsync(out)
+            for ((i, apk) in apks.withIndex()) {
+                session.openWrite(if (i == 0) "base.apk" else "split_$i.apk", 0, apk.length()).use { out ->
+                    apk.inputStream().use { it.copyTo(out) }
+                    session.fsync(out)
+                }
             }
             return suspendCancellableCoroutine { cont ->
                 val receiver = object : BroadcastReceiver() {

@@ -44,7 +44,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     sealed class State {
         data object Idle : State()
         data class Working(val message: String) : State()
-        data class Analyzed(val file: File, val info: AppInfo, val report: Doctor.Report) : State()
+        data class Analyzed(val file: File, val bundle: dev.thumb.app.core.Bundle, val info: AppInfo, val report: Doctor.Report) : State()
         /** Installed, but the game's OBB data file isn't in place yet. */
         data class ObbNeeded(val info: AppInfo, val status: String? = null, val busy: Boolean = false) : State()
         data class Ready(val info: AppInfo, val obbNote: String?) : State()
@@ -89,24 +89,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = State.Working("Reading app…")
         raw("analyze $uri")
         try {
-            val (file, info, report) = withContext(Dispatchers.IO) {
+            val analyzed = withContext(Dispatchers.IO) {
                 val file = File(context.cacheDir, "input.apk")
                 context.contentResolver.openInputStream(uri).use { input ->
                     requireNotNull(input) { "Cannot open the selected file" }
                     file.outputStream().use { input.copyTo(it) }
                 }
                 raw("copied to ${file.path} (${file.length() / 1024} KB)")
-                val info = readInfo(file)
+                val bundle = dev.thumb.app.core.Bundle.open(file, File(context.cacheDir, "bundle"))
+                if (bundle.apks.size > 1 || bundle.obbs.isNotEmpty())
+                    raw("bundle: ${bundle.apks.joinToString { it.name }}; obb: ${bundle.obbs.joinToString { it.name }.ifEmpty { "none" }}")
+                val info = readInfo(bundle.base).let { if (bundle.obbs.isNotEmpty()) it.copy(needsObb = true) else it }
                 raw("package ${info.packageName} ${info.versionName} (code ${info.versionCode}), targetSdk ${info.targetSdk}, needsObb=${info.needsObb}")
                 val report = Doctor.check(file, supported)
                 for (lib in report.libs) {
                     raw("doctor: ${lib.name} ${lib.handled}/${lib.total}" + (lib.error?.let { " ERROR $it" } ?: ""))
                     for ((cat, syms) in lib.missing) raw("doctor:   missing $cat: ${syms.joinToString()}")
                 }
-                Triple(file, info, report)
+                State.Analyzed(file, bundle, info, report)
             }
-            step("Checked ${info.label}: ${report.percent}% compatible")
-            _state.value = State.Analyzed(file, info, report)
+            val parts = analyzed.bundle.apks.size
+            step("Checked ${analyzed.info.label}: ${analyzed.report.percent}% compatible" + if (parts > 1) " ($parts-part bundle)" else "")
+            _state.value = analyzed
         } catch (e: Exception) {
             fail(e)
         }
@@ -119,27 +123,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = State.Working("Adding the translator…")
                 val runtime = context.assets.open("runtime/libthumb.so").readBytes()
                 val stub = context.assets.open("runtime/libthumb_stub.so").readBytes()
-                val unsigned = File(context.cacheDir, "patched-unsigned.apk")
-                val result = Patcher(runtime, stub).patch(analyzed.file, unsigned) { raw("patch: $it") }
-                step("Added the THUMB translator to ${result.libs.size} 32-bit libraries")
-                if (result.newTargetSdk != null) step("Updated it for modern Android (target ${result.oldTargetSdk} → ${result.newTargetSdk})")
+                val outDir = File(context.cacheDir, "patched").apply { deleteRecursively(); mkdirs() }
+                var libCount = 0
+                var target: Pair<Int?, Int?>? = null
+                val unsigned = analyzed.bundle.apks.mapIndexed { i, apk ->
+                    val out = File(outDir, "$i-unsigned.apk")
+                    val result = Patcher(runtime, stub).patch(apk, out) { raw("patch: $it") }
+                    libCount += result.libs.size
+                    if (result.newTargetSdk != null) target = result.oldTargetSdk to result.newTargetSdk
+                    out
+                }
+                require(libCount > 0) { "No 32-bit (armeabi-v7a) libraries found: THUMB is not needed for this app" }
+                step("Added the THUMB translator to $libCount 32-bit libraries")
+                target?.let { (old, new) -> step("Updated it for modern Android (target $old → $new)") }
                 _state.value = State.Working("Signing…")
-                val signed = File(context.cacheDir, "patched.apk")
                 val t0 = System.nanoTime()
-                Signer.sign(unsigned, signed)
-                raw("signed in ${(System.nanoTime() - t0) / 1_000_000} ms -> ${signed.length() / 1024} KB")
-                unsigned.delete()
+                val signed = unsigned.mapIndexed { i, u ->
+                    File(outDir, "$i.apk").also { Signer.sign(u, it); u.delete() }
+                }
+                raw("signed ${signed.size} APK(s) in ${(System.nanoTime() - t0) / 1_000_000} ms")
                 step("Signed with this phone's THUMB key")
                 signed
             }
             _state.value = State.Working("Installing… confirm in the dialog")
-            raw("install session started")
+            raw("install session started (${signed.size} APK(s))")
             val outcome = Installer.install(context, signed)
-            withContext(Dispatchers.IO) { signed.delete() }
+            withContext(Dispatchers.IO) { signed.forEach { it.delete() } }
             when (outcome) {
                 is Installer.Outcome.Success -> {
                     step("Installed ${info.label}")
-                    afterInstall(info)
+                    afterInstall(info, analyzed.bundle)
                 }
                 is Installer.Outcome.Failure -> {
                     raw("install failed: status ${outcome.status} ${outcome.message}")
@@ -151,9 +164,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun afterInstall(info: AppInfo) {
+    private suspend fun afterInstall(info: AppInfo, bundle: dev.thumb.app.core.Bundle) {
         if (!info.needsObb) {
             _state.value = State.Ready(info, null)
+            return
+        }
+        // Bundles (.xapk) often carry the OBB: put it in place automatically.
+        bundle.obbs.firstOrNull()?.let { obb ->
+            importObb(State.ObbNeeded(info), android.net.Uri.fromFile(obb))
             return
         }
         val present = withContext(Dispatchers.IO) { ObbFinder.installed(info.packageName, info.versionCode) }

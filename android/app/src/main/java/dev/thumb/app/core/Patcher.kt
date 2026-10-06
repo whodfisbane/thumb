@@ -37,10 +37,11 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
                             name.startsWith("lib/") -> if (name.startsWith("lib/armeabi-v7a/") && name.endsWith(".so")) armLibs += e
                             name.startsWith("META-INF/") && isSignatureFile(name) -> Unit // old signature
                             name == "AndroidManifest.xml" -> {
-                                val r = ManifestPatcher.raiseTargetSdk(src.getInputStream(e).readBytes(), MIN_TARGET_SDK)
+                                val r = ManifestPatcher.patch(src.getInputStream(e).readBytes(), MIN_TARGET_SDK)
                                 targetOld = r.oldTarget
                                 targetNew = r.newTarget
                                 r.newTarget?.let { log("targetSdkVersion ${r.oldTarget} -> $it") }
+                                if (r.forcedExtractNativeLibs) log("extractNativeLibs false -> true")
                                 out.addDeflated(name, r.bytes, e.time)
                             }
                             else -> {
@@ -51,7 +52,11 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
                             }
                         }
                     }
-                    require(armLibs.isNotEmpty()) { "This APK has no 32-bit (armeabi-v7a) libraries: THUMB is not needed" }
+                    if (armLibs.isEmpty()) {
+                        // A split without native code (or the base of a bundle): just re-signed.
+                        log("copied $copied files unchanged (${copiedBytes / 1024} KB), no 32-bit libraries here")
+                        return@use
+                    }
                     log("copied $copied files unchanged (${copiedBytes / 1024} KB): code, resources, assets")
                     val now = System.currentTimeMillis()
                     for (e in armLibs) {
@@ -67,7 +72,7 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
                 }
             }
         }
-        log("patched in ${(System.nanoTime() - started) / 1_000_000} ms -> ${output.length() / 1024} KB")
+        log("patched ${input.name} in ${(System.nanoTime() - started) / 1_000_000} ms -> ${output.length() / 1024} KB")
         return Result(libs, targetOld, targetNew)
     }
 

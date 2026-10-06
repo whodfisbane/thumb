@@ -14,8 +14,59 @@ object ManifestPatcher {
     private const val ATTR_TARGET_SDK = 0x01010270
     private const val ATTR_MIN_SDK = 0x0101020c
     private const val TYPE_INT_DEC = 0x10
+    private const val TYPE_INT_BOOLEAN = 0x12
+    private const val ATTR_EXTRACT_NATIVE_LIBS = 0x010104ea
 
-    data class Result(val bytes: ByteArray, val oldTarget: Int?, val newTarget: Int?)
+    data class Result(val bytes: ByteArray, val oldTarget: Int?, val newTarget: Int?, val forcedExtractNativeLibs: Boolean = false)
+
+    /**
+     * Applies all THUMB edits: raise targetSdkVersion to [minTarget] and set
+     * android:extractNativeLibs to true (THUMB's stub loads the original
+     * library from a file next to it, so libs must be extracted).
+     */
+    fun patch(axml: ByteArray, minTarget: Int): Result {
+        val r = raiseTargetSdk(axml, minTarget)
+        val forced = forceExtractNativeLibs(r.bytes)
+        return r.copy(forcedExtractNativeLibs = forced)
+    }
+
+    /** Flips an existing android:extractNativeLibs="false" to true, in place. */
+    fun forceExtractNativeLibs(out: ByteArray): Boolean {
+        var changed = false
+        forEachAttribute(out) { b, a, resId, dataType ->
+            if (resId == ATTR_EXTRACT_NATIVE_LIBS && dataType == TYPE_INT_BOOLEAN && b.getInt(a + 16) == 0) {
+                b.putInt(a + 16, -1)
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    /** Calls [fn] for every attribute of every element (buffer, attr offset, resource id, data type). */
+    private fun forEachAttribute(out: ByteArray, fn: (ByteBuffer, Int, Int, Int) -> Unit) {
+        val b = ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN)
+        var resMap = IntArray(0)
+        var pos = b.getShort(2).toInt() and 0xFFFF
+        while (pos + 8 <= out.size) {
+            val type = b.getShort(pos).toInt() and 0xFFFF
+            val headerSize = b.getShort(pos + 2).toInt() and 0xFFFF
+            val size = b.getInt(pos + 4)
+            if (size <= 0) break
+            if (type == RES_XML_RESOURCE_MAP) resMap = IntArray((size - headerSize) / 4) { b.getInt(pos + headerSize + it * 4) }
+            if (type == RES_XML_START_ELEMENT) {
+                val ext = pos + headerSize
+                val attrStart = b.getShort(ext + 8).toInt() and 0xFFFF
+                val attrSize = b.getShort(ext + 10).toInt() and 0xFFFF
+                val attrCount = b.getShort(ext + 12).toInt() and 0xFFFF
+                for (i in 0 until attrCount) {
+                    val a = ext + attrStart + i * attrSize
+                    val resId = resMap.getOrNull(b.getInt(a + 4)) ?: continue
+                    fn(b, a, resId, out[a + 15].toInt() and 0xFF)
+                }
+            }
+            pos += size
+        }
+    }
 
     /**
      * Raises android:targetSdkVersion on <uses-sdk> to at least [minTarget]
