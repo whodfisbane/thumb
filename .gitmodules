@@ -1,0 +1,6 @@
+[submodule "third_party/dynarmic"]
+	path = third_party/dynarmic
+	url = https://github.com/azahar-emu/dynarmic
+[submodule "third_party/tlsf"]
+	path = third_party/tlsf
+	url = https://github.com/mattconte/tlsf

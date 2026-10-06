@@ -1,0 +1,12 @@
+# build output
+/build*/
+*.o
+*.so
+!tests/**/*.so
+# NEVER commit game files
+*.apk
+*.obb
+*.zip
+/games/
+# downloaded by tools/build-android.sh
+/third_party/libffi-*/
