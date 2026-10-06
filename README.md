@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/branding/thumb-icon-1024.png" width="160" alt="THUMB icon: a thumbs-up on a CPU chip"></p>
+
 # THUMB 👍
 
 **THUMB Helps Unsupported Mobile Binaries.**
