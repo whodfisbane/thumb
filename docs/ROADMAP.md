@@ -71,6 +71,17 @@ the app's own window). The repackager adds a small `classes-thumb.dex` for the U
 - [ ] Self-modifying code detection (Mono-based Unity games generate code at runtime)
 - [ ] Test a second game and a non-game app
 
+## Phase 3.5: Addons (niche and community)
+
+All **official API support ships inside THUMB** (each API family is only ~10-50 KB; the
+JIT is ~1.6 MB of the ~4 MB runtime), so patched apps work fully offline. Addons are for:
+
+- [ ] Community content (data only, no native code): per-game patches, value-editor presets,
+      gamepad layouts, compatibility notes
+- [ ] Niche or very large optional components, official and signed (e.g. a Vulkan layer)
+- [ ] THUMB Doctor names the addon an app needs and offers to download it
+- [ ] Code stays organized per API family so packs can be split out later if needed
+
 ## Phase 4: Performance and polish
 
 - [ ] Measure THUMB's own overhead (stats readout), tune JIT cache sizes per thread
