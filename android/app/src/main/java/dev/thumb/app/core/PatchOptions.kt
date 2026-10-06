@@ -8,7 +8,9 @@ data class PatchOptions(
     // ---- Build options (apply with or without the overlay) ----
     /** Block calls to known ad SDKs from the start. */
     val adblock: Boolean = true,
-    /** Frame rate cap from the start (0 = no limit). Old games were built for 60. */
+    /** FPS mode from the start: "default" (screen decides), "unlock" (highest refresh), "limit". */
+    val fpsMode: String = "limit",
+    /** Cap used in "limit" mode (0 = no limit). Old games were built for 60. */
     val fpsLimit: Int = 60,
     /**
      * Compat shims for behaviour modern Android changed (virtual /, positioned
@@ -37,6 +39,7 @@ data class PatchOptions(
     fun toJson(): String = org.json.JSONObject().apply {
         put("version", 1)
         put("adblock", adblock)
+        put("fps_mode", fpsMode)
         put("fps_limit", fpsLimit)
         put("legacy_fs", legacyFs)
         put("overlay", overlay)

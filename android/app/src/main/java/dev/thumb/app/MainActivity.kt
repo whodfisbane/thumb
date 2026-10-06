@@ -354,28 +354,35 @@ private fun SectionDivider() {
     }
 }
 
-/** Build option: typeable FPS limit (0 = none), with a warning above 60. */
+/** Build option: FPS mode (Default / Unlock / Limit n), warning when it can go above 60. */
 @Composable
-private fun FpsLimitRow(value: Int, onChange: (Int) -> Unit) {
-    var text by remember { mutableStateOf(value.toString()) }
-    Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("FPS limit", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text("Saves battery, keeps old games at their speed (0 = no limit)", color = Muted, fontSize = 12.sp)
+private fun FpsRow(mode: String, limit: Int, onChange: (String, Int) -> Unit) {
+    var text by remember { mutableStateOf(limit.toString()) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("FPS", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text("Default: the screen decides · Unlock: highest refresh rate · Limit: cap it (0 = none)", color = Muted, fontSize = 12.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for ((id, name) in listOf("default" to "Default", "unlock" to "Unlock", "limit" to "Limit")) {
+                androidx.compose.material3.FilterChip(
+                    selected = mode == id,
+                    onClick = { onChange(id, text.toIntOrNull() ?: 0) },
+                    label = { Text(label(name)) },
+                )
             }
-            androidx.compose.material3.OutlinedTextField(
-                value = text,
-                onValueChange = { new ->
-                    text = new.filter { it.isDigit() }.take(4)
-                    onChange(text.toIntOrNull() ?: 0)
-                },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                modifier = Modifier.width(84.dp),
-            )
+            if (mode == "limit") {
+                androidx.compose.material3.OutlinedTextField(
+                    value = text,
+                    onValueChange = { new ->
+                        text = new.filter { it.isDigit() }.take(4)
+                        onChange("limit", text.toIntOrNull() ?: 0)
+                    },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                    modifier = Modifier.width(76.dp),
+                )
+            }
         }
-        if (value > 60) {
+        if (mode == "unlock" || (mode == "limit" && (limit == 0 || limit > 60))) {
             var open by remember { mutableStateOf(false) }
             Text(
                 if (open) "⚠️ Warning ▴" else "⚠️ Warning ▾", color = Warn, fontSize = 12.sp, fontWeight = FontWeight.Bold,
@@ -410,7 +417,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     SectionDivider()
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
-    FpsLimitRow(options.fpsLimit) { onChange(options.copy(fpsLimit = it)) }
+    FpsRow(options.fpsMode, options.fpsLimit) { mode, limit -> onChange(options.copy(fpsMode = mode, fpsLimit = limit)) }
     OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) },
         info = P.WARN_SANDBOX)
     OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
@@ -424,7 +431,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, {
         if (it) ask("Include the speed slider?", P.WARN_SPEED) { onChange(options.copy(speed = true)) } else onChange(options.copy(speed = false))
     }, P.WARN_SPEED, enabled = options.overlay, indent = true)
-    OptionRow("FPS limit control", "Change the FPS limit while playing", options.fpsLimitControl, { onChange(options.copy(fpsLimitControl = it)) },
+    OptionRow("FPS control", "Switch Default / Unlock / Limit while playing", options.fpsLimitControl, { onChange(options.copy(fpsLimitControl = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Keep screen on", "For reading, loading screens, idle games", options.keepScreenOn, { onChange(options.copy(keepScreenOn = it)) },
         enabled = options.overlay, indent = true)

@@ -75,7 +75,13 @@ void thumb_start_overlay(JNIEnv* env) {
         return at == std::string::npos ? fallback : std::atoi(compact.c_str() + at);
     };
     h32::jni::set_ad_block(flag("adblock", true));
-    h32::timescale::set_fps_limit(number("fps_limit", 0));
+    // FPS mode: "limit" paces frames at fps_limit; "default"/"unlock" don't pace
+    // (unlock only changes the display mode, which the overlay does).
+    {
+        auto at = value_at("fps_mode");
+        bool limit = at == std::string::npos || compact.compare(at, 7, "\"limit\"") == 0;
+        h32::timescale::set_fps_limit(limit ? number("fps_limit", 0) : 0);
+    }
     h32::compat::legacy_fs = flag("legacy_fs", true);
     if (!flag("overlay", false)) {
         env->PopLocalFrame(nullptr);

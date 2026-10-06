@@ -62,7 +62,9 @@ public final class ThumbOverlay {
     private static final int MUTED = 0xFF9AA8A2;
     private static final float[] SPEEDS = {0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f};
     private static final String[] ROTATIONS = {"Auto", "Landscape", "Portrait"};
-    private static int fpsLimitDefault = 60; // the "FPS limit" build option (0 = none)
+    // The FPS build option: mode "default" | "unlock" | "limit", and the limit.
+    private static String fpsModeDefault = "limit";
+    private static int fpsLimitDefault = 60;
 
     static final String WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play.";
     static final String WARN_FPS_HIGH = "Most legacy games were built for 60 FPS. Running them faster can break physics, animations or game speed (for example characters moving or jumping too fast).";
@@ -90,6 +92,7 @@ public final class ThumbOverlay {
         }
         menuEnabled = options.optBoolean("overlay", false);
         adblockDefault = options.optBoolean("adblock", true);
+        fpsModeDefault = options.optString("fps_mode", "limit");
         fpsLimitDefault = options.optInt("fps_limit", 60);
         JSONObject mods = options.optJSONObject("mods");
         if (mods == null) mods = new JSONObject();
@@ -157,7 +160,7 @@ public final class ThumbOverlay {
         ViewGroup decor = (ViewGroup) w.getDecorView();
 
         // Persistent mod states, re-applied to every screen of the app.
-        applyFpsLimit(a, prefs.getInt("fps_limit", fpsLimitDefault)); // build option, or the menu's choice
+        applyFps(a, fpsMode(), prefs.getInt("fps_limit", fpsLimitDefault)); // build option, or the menu's choice
         if (modScreenOn) applyScreenOn(a, prefs.getBoolean("screen_on", false));
         if (modRotation) applyRotation(a, prefs.getInt("rotation", 0));
         if (modFullscreen) applyFullscreen(a, prefs.getBoolean("fullscreen", false));
@@ -379,46 +382,69 @@ public final class ThumbOverlay {
         panel.addView(bar);
     }
 
-    /** Typeable FPS limit (0 = no limit); above 60 asks first, once. */
+    /** FPS: Default / Unlock / Limit [n]. Anything above 60 asks first, once. */
     private static void addFpsLimit(final Activity a, LinearLayout panel) {
-        TextView label = text(a, "FPS limit (0 = no limit)", 15, Color.WHITE);
+        TextView label = text(a, "FPS", 15, Color.WHITE);
         label.setPadding(0, dp(a, 10), 0, 0);
         panel.addView(label);
-        LinearLayout row = new LinearLayout(a);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        final LinearLayout modes = new LinearLayout(a);
+        final LinearLayout limitRow = new LinearLayout(a);
+        limitRow.setGravity(Gravity.CENTER_VERTICAL);
+        final TextView status = text(a, "", 13, MUTED);
+        final String[] ids = {"default", "unlock", "limit"};
+        final String[] names = {"DEFAULT", "UNLOCK", "LIMIT"};
+        final TextView[] buttons = new TextView[3];
         final android.widget.EditText field = new android.widget.EditText(a);
+
+        final Runnable refresh = () -> {
+            String m = fpsMode();
+            for (int i = 0; i < 3; i++) buttons[i].setTextColor(ids[i].equals(m) ? MINT : MUTED);
+            limitRow.setVisibility("limit".equals(m) ? View.VISIBLE : View.GONE);
+            int n = prefs.getInt("fps_limit", fpsLimitDefault);
+            status.setText("default".equals(m) ? "Screen default" : "unlock".equals(m) ? "Highest refresh rate"
+                : n == 0 ? "No limit" : "Limited to " + n + " FPS");
+        };
+        // Applies [mode]/[limit], asking first (once) when it can go above 60.
+        final java.util.function.BiConsumer<String, Integer> choose = (mode, limit) -> {
+            Runnable go = () -> {
+                prefs.edit().putString("fps_mode", mode).putInt("fps_limit", limit).apply();
+                applyFps(a, mode, limit);
+                refresh.run();
+            };
+            boolean high = "unlock".equals(mode) || ("limit".equals(mode) && (limit == 0 || limit > 60));
+            if (high && !prefs.getBoolean("fps_high_warned", false)) {
+                new AlertDialog.Builder(a).setTitle("Above 60 FPS?").setMessage(WARN_FPS_HIGH)
+                    .setPositiveButton("Continue", (d, w) -> { prefs.edit().putBoolean("fps_high_warned", true).apply(); go.run(); })
+                    .setNegativeButton("Cancel", null).show();
+            } else {
+                go.run();
+            }
+        };
+
+        for (int i = 0; i < 3; i++) {
+            final String id = ids[i];
+            buttons[i] = button(a, names[i]);
+            buttons[i].setOnClickListener(v -> choose.accept(id, prefs.getInt("fps_limit", fpsLimitDefault)));
+            modes.addView(buttons[i]);
+        }
         field.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         field.setText(String.valueOf(prefs.getInt("fps_limit", fpsLimitDefault)));
         field.setTextColor(Color.WHITE);
         field.setEms(4);
-        row.addView(field);
-        final TextView status = text(a, "", 13, MUTED);
+        limitRow.addView(field);
         TextView apply = button(a, "APPLY");
         apply.setOnClickListener(v -> {
-            int fps;
             try {
-                fps = Math.max(0, Math.min(1000, Integer.parseInt(field.getText().toString().trim())));
+                choose.accept("limit", Math.max(0, Math.min(1000, Integer.parseInt(field.getText().toString().trim()))));
             } catch (NumberFormatException e) {
                 status.setText("Enter a number");
-                return;
-            }
-            final int value = fps;
-            Runnable doApply = () -> {
-                prefs.edit().putInt("fps_limit", value).apply();
-                applyFpsLimit(a, value);
-                status.setText(value == 0 ? "No limit" : "Limited to " + value + " FPS");
-            };
-            if (value > 60 && !prefs.getBoolean("fps_high_warned", false)) {
-                new AlertDialog.Builder(a).setTitle("Above 60 FPS?").setMessage(WARN_FPS_HIGH)
-                    .setPositiveButton("Apply", (d, w) -> { prefs.edit().putBoolean("fps_high_warned", true).apply(); doApply.run(); })
-                    .setNegativeButton("Cancel", null).show();
-            } else {
-                doApply.run();
             }
         });
-        row.addView(apply);
-        panel.addView(row);
+        limitRow.addView(apply);
+        panel.addView(modes);
+        panel.addView(limitRow);
         panel.addView(status);
+        refresh.run();
     }
 
     private static void addRotation(final Activity a, LinearLayout panel) {
@@ -465,25 +491,28 @@ public final class ThumbOverlay {
 
     // ------------------------------------------------------------------ mods
 
+    private static String fpsMode() { return prefs.getString("fps_mode", fpsModeDefault); }
+
     /**
-     * FPS limit: ask the display for a refresh rate at or just above the limit
-     * (saves the most battery), and pace frames in the runtime so the limit
-     * holds exactly. 0 = no limit (the display's default).
+     * FPS mode. default: the display decides, no pacing. unlock: the display's
+     * highest refresh rate, no pacing. limit: a refresh rate at or just above
+     * the limit (saves battery) plus exact frame pacing in the runtime.
      */
-    private static void applyFpsLimit(Activity a, int fps) {
-        nativeSetFpsLimit(fps);
+    private static void applyFps(Activity a, String mode, int limit) {
+        boolean limiting = "limit".equals(mode) && limit > 0;
+        nativeSetFpsLimit(limiting ? limit : 0);
         Window w = a.getWindow();
         if (w == null) return;
         WindowManager.LayoutParams lp = w.getAttributes();
         int modeId = 0;
-        if (fps > 0) {
+        if (limiting || "unlock".equals(mode)) {
             Display d = a.getWindowManager().getDefaultDisplay();
             Display.Mode current = d.getMode();
-            float best = Float.MAX_VALUE;
+            float best = limiting ? Float.MAX_VALUE : 0;
             for (Display.Mode m : d.getSupportedModes()) {
+                if (m.getPhysicalWidth() != current.getPhysicalWidth() || m.getPhysicalHeight() != current.getPhysicalHeight()) continue;
                 float r = m.getRefreshRate();
-                if (m.getPhysicalWidth() == current.getPhysicalWidth() && m.getPhysicalHeight() == current.getPhysicalHeight()
-                        && r >= fps - 1 && r < best) {
+                if (limiting ? (r >= limit - 1 && r < best) : r > best) {
                     best = r;
                     modeId = m.getModeId();
                 }
