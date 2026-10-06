@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,6 +100,15 @@ private fun ThumbLogo(modifier: Modifier, description: String? = null) = Image(
     painterResource(R.drawable.thumb_logo), description, modifier,
     colorFilter = if (LocalHolo.current) androidx.compose.ui.graphics.ColorFilter.tint(HoloBlue) else null,
 )
+
+/** Text with **bold** parts (marked with double asterisks) for the important words. */
+private fun rich(text: String) = androidx.compose.ui.text.buildAnnotatedString {
+    val parts = text.split("**")
+    for ((i, part) in parts.withIndex()) {
+        if (i % 2 == 1) withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)) { append(part) }
+        else append(part)
+    }
+}
 
 /** Button labels are ALL CAPS in Holo mode, like Android 4.x. */
 @Composable
@@ -152,11 +162,14 @@ private fun ThumbScreen(onToggleHolo: () -> Unit, vm: MainViewModel = viewModel(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(if (holo) 12.dp else 20.dp),
         verticalArrangement = Arrangement.spacedBy(if (holo) 12.dp else 16.dp),
     ) {
-        if (!holo) Header(onAbout = { aboutOpen = true })
+        // Back: from any screen except while working (patching/installing).
+        val canGoBack = state !is State.Idle && state !is State.Working
+        androidx.activity.compose.BackHandler(enabled = canGoBack) { vm.reset() }
+        if (!holo && state is State.Idle) Header(onAbout = { aboutOpen = true })
         when (val s = state) {
             is State.Idle -> IdleCard { picker.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "*/*")) }
             is State.Working -> WorkingCard(s, steps)
-            is State.Analyzed -> ReportCard(s, onPatch = { vm.patchAndInstall(s) }, onCancel = vm::reset)
+            is State.Analyzed -> ReportCard(s, onPatch = { options -> vm.patchAndInstall(s, options) }, onCancel = vm::reset)
             is State.ObbNeeded -> ObbCard(s, vm)
             is State.Ready -> ReadyCard(s, steps, onAgain = vm::reset)
             is State.Failed -> FailedCard(s, onBack = vm::reset)
@@ -269,7 +282,7 @@ private fun Steps(steps: List<String>) {
 @Composable
 private fun IdleCard(onPick: () -> Unit) = PanelCard {
     Text("Run old 32-bit apps and games on this phone", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-    Text("Pick an APK. THUMB checks it, adds its ARM32 translator, signs it with this phone's own key and installs it.", color = Muted)
+    Text(rich("Pick an APK. THUMB **checks** it, adds its **ARM32 translator**, signs it with **this phone's own key** and **installs** it."), color = Muted)
     TButton(onClick = onPick, modifier = Modifier.fillMaxWidth()) { Text(label("Add app"), fontWeight = FontWeight.Bold) }
 }
 
@@ -296,8 +309,69 @@ private fun WorkingCard(s: State.Working, steps: List<String>) = PanelCard {
     }
 }
 
+/** One option: title, description, switch; its warning shows while it's on. */
 @Composable
-private fun ReportCard(s: State.Analyzed, onPatch: () -> Unit, onCancel: () -> Unit) = PanelCard {
+private fun OptionRow(
+    title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit,
+    warning: String? = null, enabled: Boolean = true, indent: Boolean = false, info: String? = null,
+) {
+    Column(Modifier.fillMaxWidth().padding(start = if (indent) 18.dp else 0.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (enabled) Color.White else Muted)
+                Text(description, color = Muted, fontSize = 12.sp)
+            }
+            androidx.compose.material3.Switch(checked = checked && enabled, onCheckedChange = onChange, enabled = enabled)
+        }
+        if (warning != null && checked && enabled) {
+            // Collapsed by default: "⚠️ Warning ▾", tap to read it.
+            var open by remember { mutableStateOf(false) }
+            Text(
+                if (open) "⚠️ Warning ▴" else "⚠️ Warning ▾", color = Warn, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { open = !open }.padding(vertical = 2.dp),
+            )
+            if (open) Text(warning, color = Warn, fontSize = 12.sp)
+        }
+        if (info != null && checked && enabled) {
+            var open by remember { mutableStateOf(false) }
+            Text(
+                if (open) "ℹ️ Info ▴" else "ℹ️ Info ▾", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { open = !open }.padding(vertical = 2.dp),
+            )
+            if (open) Text(info, color = Muted, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
+    var confirmFpsUnlock by remember { mutableStateOf(false) }
+    if (confirmFpsUnlock) AlertDialog(
+        onDismissRequest = { confirmFpsUnlock = false },
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        title = { Text("Include FPS unlock?", fontWeight = FontWeight.Bold) },
+        text = { Text(dev.thumb.app.core.PatchOptions.WARN_FPS_UNLOCK, color = Muted) },
+        confirmButton = { TTextButton(onClick = { confirmFpsUnlock = false; onChange(options.copy(fpsUnlock = true)) }) { Text(label("Include")) } },
+        dismissButton = { TTextButton(onClick = { confirmFpsUnlock = false }) { Text(label("Cancel"), color = Muted) } },
+    )
+    val P = dev.thumb.app.core.PatchOptions
+    Text("Options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
+    OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
+    OptionRow("THUMB overlay", "In-game menu with the mods below", options.overlay, { onChange(options.copy(overlay = it)) }, info = P.WARN_OVERLAY)
+    OptionRow("FPS counter", "Shows frames per second", options.fpsCounter, { onChange(options.copy(fpsCounter = it)) },
+        enabled = options.overlay, indent = true)
+    OptionRow("Speed slider", "Slow-motion or fast-forward the game", options.speed, { onChange(options.copy(speed = it)) },
+        P.WARN_SPEED, enabled = options.overlay, indent = true)
+    OptionRow("FPS unlock", "Use the screen's highest refresh rate", options.fpsUnlock, {
+        if (it) confirmFpsUnlock = true else onChange(options.copy(fpsUnlock = false))
+    }, P.WARN_FPS_UNLOCK, enabled = options.overlay, indent = true)
+    OptionRow("Ad-block toggle", "Switch ad blocking on/off while playing", options.adblockToggle, { onChange(options.copy(adblockToggle = it)) },
+        enabled = options.overlay, indent = true)
+}
+
+@Composable
+private fun ReportCard(s: State.Analyzed, onPatch: (dev.thumb.app.core.PatchOptions) -> Unit, onCancel: () -> Unit) = PanelCard {
+    var options by remember(s.info.packageName) { mutableStateOf(dev.thumb.app.core.PatchOptions()) }
     val r = s.report
     AppTitle(s.info)
     if (!r.needsThumb) {
@@ -312,20 +386,21 @@ private fun ReportCard(s: State.Analyzed, onPatch: () -> Unit, onCancel: () -> U
     }
     Text("THUMB Doctor: ${r.percent}%", color = color, fontWeight = FontWeight.Black, fontSize = 22.sp)
     LinearProgressIndicator(progress = { r.percent / 100f }, modifier = Modifier.fillMaxWidth(), color = color, trackColor = Ink)
-    Text("${r.verdict} · ${r.handled}/${r.total} system calls handled", color = Muted, fontSize = 13.sp)
+    Text(rich("**${r.verdict}** · ${r.handled}/${r.total} system calls handled"), color = Muted, fontSize = 13.sp)
     val missing = r.libs.flatMap { it.missing.entries }.groupBy({ it.key }, { it.value.size }).mapValues { it.value.sum() }
     if (missing.isNotEmpty()) {
-        Text("Not supported yet: " + missing.entries.sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }, color = Muted, fontSize = 13.sp)
+        Text(rich("**Not supported yet:** " + missing.entries.sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }), color = Muted, fontSize = 13.sp)
     }
-    if (s.info.needsObb) Text("📦 Uses an extra data file (OBB): you can add it right after installing.", color = Muted, fontSize = 13.sp)
+    if (s.info.needsObb) Text(rich("📦 Uses an **extra data file (OBB)**: you can add it right after installing."), color = Muted, fontSize = 13.sp)
     if (s.info.conflictingInstall) {
-        Text("⚠️ ${s.info.label} is already installed with a different signature. Uninstall it first (its data will be lost).", color = Warn, fontSize = 13.sp)
+        Text(rich("⚠️ ${s.info.label} is already installed with a **different signature**. Uninstall it first (**its data will be lost**)."), color = Warn, fontSize = 13.sp)
         val ctx = LocalContext.current
         TOutlinedButton(onClick = {
             ctx.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${s.info.packageName}")))
         }, modifier = Modifier.fillMaxWidth()) { Text("Uninstall existing app") }
     }
-    TButton(onClick = onPatch, modifier = Modifier.fillMaxWidth(), enabled = !s.info.conflictingInstall) {
+    OptionsSection(options) { options = it }
+    TButton(onClick = { onPatch(options) }, modifier = Modifier.fillMaxWidth(), enabled = !s.info.conflictingInstall) {
         Text("Patch & install", fontWeight = FontWeight.Bold)
     }
     TOutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(label("Cancel")) }
@@ -350,8 +425,8 @@ private fun ObbCard(s: State.ObbNeeded, vm: MainViewModel) = PanelCard {
     AppTitle(s.info)
     Text("📦 ${s.info.label} needs its data file (OBB)", fontWeight = FontWeight.Bold, fontSize = 17.sp)
     Text(
-        "If you have it, THUMB will look for it in a folder you choose. If THUMB can't find it, pick the file yourself. " +
-            "It's usually named ${s.info.obbName}.",
+        rich("If you have it, THUMB will **look for it** in a folder you choose. If THUMB can't find it, **pick the file yourself**. " +
+            "It's usually named **${s.info.obbName}**."),
         color = Muted, fontSize = 13.sp,
     )
     s.status?.let { Text(it, color = if (s.busy) accent() else Warn, fontSize = 13.sp) }
@@ -400,9 +475,9 @@ private fun SearchAccessDialog(onFolder: () -> Unit, onFullAccess: () -> Unit, o
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Choose a folder", color = accent(), fontWeight = FontWeight.Bold)
-                Text("THUMB can only see that folder. Android doesn't allow picking Download itself, so use a folder inside it (e.g. Download/THUMB).", color = Muted, fontSize = 13.sp)
+                Text(rich("THUMB can **only see that folder**. Android doesn't allow picking Download itself, so use a folder inside it (e.g. **Download/THUMB**)."), color = Muted, fontSize = 13.sp)
                 Text("Allow full file access", color = accent(), fontWeight = FontWeight.Bold)
-                Text("THUMB searches Download and similar folders by itself. THUMB has no internet permission, so nothing it reads can leave your phone.", color = Muted, fontSize = 13.sp)
+                Text(rich("THUMB searches **Download** and similar folders by itself. THUMB has **no internet permission**, so nothing it reads can leave your phone."), color = Muted, fontSize = 13.sp)
             }
         },
         confirmButton = {
@@ -494,11 +569,11 @@ private fun AboutDialog(onToggleHolo: () -> Unit, onClose: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("THUMB Helps Unsupported Mobile Binaries: runs old 32-bit Android apps and games on 64-bit-only phones.", color = Color.White, fontSize = 14.sp)
-                Text("Free software under the GNU GPL v3.0. You can use, study, share and change it.", color = Muted, fontSize = 13.sp)
+                Text(rich("**Free software** under the **GNU GPL v3.0**. You can use, study, share and change it."), color = Muted, fontSize = 13.sp)
                 Text("Built with Claude Opus 5.5 (Anthropic) as a pair programmer.", color = Muted, fontSize = 13.sp)
                 Text("Source code: GitHub (link coming soon)", color = Muted, fontSize = 13.sp)
                 Text("Includes: dynarmic (0BSD), TLSF (BSD), libffi (MIT), apksig and jni.h (Apache-2.0), AndroidX/Compose (Apache-2.0).", color = Muted, fontSize = 12.sp)
-                Text("THUMB contains no code or data from any app or game. Patch only apps you own and never share patched APKs.", color = Muted, fontSize = 12.sp)
+                Text(rich("THUMB contains no code or data from any app or game. **Patch only apps you own** and **never share patched APKs**."), color = Muted, fontSize = 12.sp)
             }
         },
         confirmButton = { TTextButton(onClick = onClose) { Text(label("Close")) } },
@@ -534,10 +609,10 @@ private fun Onboarding() {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("THUMB needs very little:", color = Color.White)
                 Text("Required", color = accent(), fontWeight = FontWeight.Bold)
-                Text("• Install unknown apps: to install the apps THUMB patches for you.", color = Muted, fontSize = 14.sp)
+                Text(rich("• **Install unknown apps**: to install the apps THUMB patches for you."), color = Muted, fontSize = 14.sp)
                 Text("Recommended", color = accent(), fontWeight = FontWeight.Bold)
-                Text("• Access to find game data (OBB files): one folder you choose, or full file access.", color = Muted, fontSize = 14.sp)
-                Text("THUMB has no internet permission: nothing leaves your phone.", color = Muted, fontSize = 12.sp)
+                Text(rich("• **Access to find game data (OBB files)**: one folder you choose, or full file access."), color = Muted, fontSize = 14.sp)
+                Text(rich("THUMB has **no internet permission**: nothing leaves your phone."), color = Muted, fontSize = 12.sp)
             }
         },
         confirmButton = {

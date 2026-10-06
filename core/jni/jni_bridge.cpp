@@ -70,6 +70,7 @@ struct MethodInfo {
 std::mutex g_methods_mutex;
 std::unordered_map<jmethodID, MethodInfo> g_methods;
 std::vector<std::string> g_block_patterns = {"Chartboost", "AdColony", "AdMob", "Interstitial"};
+std::atomic<bool> g_ad_block{true};
 
 bool parse_signature(const char* sig, std::vector<char>& args, char& ret) {
     if (!sig || *sig != '(') return false;
@@ -142,6 +143,11 @@ JNIEnv* host_env() {
 
 EnvScope::EnvScope(JNIEnv* env) : prev_(t_env) { t_env = env; }
 EnvScope::~EnvScope() { t_env = prev_; }
+
+void set_ad_block(bool on) {
+    g_ad_block = on;
+    H32_INFO("ad block %s", on ? "on" : "off");
+}
 
 void set_blocked_methods(std::vector<std::string> patterns) {
     std::lock_guard lk(g_methods_mutex);
@@ -306,7 +312,7 @@ void call_slot(GuestThread& t) {
         VarArgs va(c);
         for (size_t i = 0; i < a.size(); i++) a[i] = read_vararg(va, mi->args[i]);
     }
-    if (mi->blocked) {
+    if (mi->blocked && g_ad_block.load(std::memory_order_relaxed)) {
         H32_DEBUG("jni: blocked call to %s", mi->name.c_str());
         return put_jvalue(t, Ret, jvalue{});
     }

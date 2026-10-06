@@ -10,6 +10,7 @@
 
 #include "thunks/libc_internal.h"
 #include "thunks/thunks.h"
+#include "thunks/timescale.h"
 
 #ifdef __ANDROID__
 #define GL_GLEXT_PROTOTYPES 1
@@ -174,6 +175,17 @@ void register_gles1() {
     add("glCheckFramebufferStatusOES", t_gl_fb_status);
 #endif
     add("glGetString", t_glGetString);
+    // Frame counter for the in-game FPS display: one color-buffer clear per frame.
+    static ThunkFn real_clear = nullptr;
+#ifdef __ANDROID__
+    real_clear = H32_WRAP(::glClear, void(GLbitfield));
+#else
+    real_clear = t_gl_noop;
+#endif
+    add("glClear", +[](GuestThread& t) {
+        if (t.regs()[0] & 0x4000 /* GL_COLOR_BUFFER_BIT */) timescale::frame();
+        real_clear(t);
+    });
 }
 
 }  // namespace thunks

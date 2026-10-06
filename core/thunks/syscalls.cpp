@@ -13,6 +13,7 @@
 #include "loader/elf_loader.h"
 #include "thunks/libc_internal.h"
 #include "thunks/thunks.h"
+#include "thunks/timescale.h"
 
 namespace h32 {
 
@@ -123,10 +124,12 @@ int32_t sys_open(GuestThread& t, int dirfd, gaddr path_addr, int flags, int mode
 
 int32_t sys_clock_gettime(GuestThread& t) {
     timespec ts;
-    if (::clock_gettime(clockid_t(t.regs()[0]), &ts) != 0) return neg_errno(errno);
+    clockid_t clock = clockid_t(t.regs()[0]);
+    if (::clock_gettime(clock, &ts) != 0) return neg_errno(errno);
+    int64_t ns = timescale::virtual_ns(clock, int64_t(ts.tv_sec) * 1000000000 + ts.tv_nsec);
     gaddr out = t.regs()[1];
-    mem().write<int32_t>(out, int32_t(ts.tv_sec));
-    mem().write<int32_t>(out + 4, int32_t(ts.tv_nsec));
+    mem().write<int32_t>(out, int32_t(ns / 1000000000));
+    mem().write<int32_t>(out + 4, int32_t(ns % 1000000000));
     return 0;
 }
 

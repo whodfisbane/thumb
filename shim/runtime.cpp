@@ -18,7 +18,8 @@
 
 using namespace h32;
 
-void thumb_obb_handover(JNIEnv* env);  // shim/obb_handover.cpp
+void thumb_obb_handover(JNIEnv* env);   // shim/obb_handover.cpp
+void thumb_start_overlay(JNIEnv* env);  // shim/overlay.cpp
 
 // Loads <dir>/<guest_name> (an original armeabi-v7a library), runs its
 // constructors and JNI_OnLoad, and returns the JNI version it reports.
@@ -47,6 +48,7 @@ extern "C" __attribute__((visibility("default"))) jint thumb_load(JavaVM* vm, co
 
     // Before any game code runs: move an OBB that THUMB prepared into place.
     thumb_obb_handover(env);
+    thumb_start_overlay(env);
 
     // The guest should see itself under its original name: libfoo_arm32.so -> libfoo.so
     std::string original = guest_name;

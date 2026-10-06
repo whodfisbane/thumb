@@ -94,7 +94,35 @@ val bundleThumbRuntime by tasks.registering {
         check(list.waitFor() == 0) { "harness --list-thunks failed" }
     }
 }
-tasks.named("preBuild") { dependsOn(bundleThumbRuntime) }
+// The in-game menu (android/overlay) is compiled to a standalone dex that the
+// patcher adds to apps. Plain javac + d8 against android.jar: it must not
+// depend on anything (the patched app ships its own libraries).
+val sdkDir = File(System.getenv("ANDROID_SDK_ROOT") ?: "/home/powmy/android-sdk")
+val buildOverlayDex by tasks.registering {
+    description = "Compiles the THUMB overlay to assets/runtime/overlay.dex"
+    val src = File(rootDir, "overlay/src")
+    inputs.dir(src)
+    outputs.file(runtimeAssets.file("overlay.dex"))
+    doLast {
+        val androidJar = File(sdkDir, "platforms/android-37.0/android.jar")
+        val d8 = sdkDir.resolve("build-tools").listFiles()!!.sortedDescending().map { File(it, "d8") }.first { it.exists() }
+        val classes = layout.buildDirectory.dir("overlay/classes").get().asFile.apply { deleteRecursively(); mkdirs() }
+        val dexOut = layout.buildDirectory.dir("overlay/dex").get().asFile.apply { deleteRecursively(); mkdirs() }
+        val sources = src.walkTopDown().filter { it.extension == "java" }.map { it.path }.toList()
+        val javac = File(System.getProperty("java.home"), "bin/javac").path
+        fun run(vararg cmd: String) {
+            val p = ProcessBuilder(*cmd).inheritIO().start()
+            check(p.waitFor() == 0) { "failed: ${cmd.first()}" }
+        }
+        run(javac, "--release", "8", "-nowarn", "-cp", androidJar.path,
+            "-d", classes.path, *sources.toTypedArray())
+        val classFiles = classes.walkTopDown().filter { it.extension == "class" }.map { it.path }.toList()
+        run(d8.path, "--min-api", "21", "--release", "--lib", androidJar.path, "--output", dexOut.path, *classFiles.toTypedArray())
+        File(dexOut, "classes.dex").copyTo(runtimeAssets.file("overlay.dex").asFile, overwrite = true)
+    }
+}
+bundleThumbRuntime { finalizedBy(buildOverlayDex) }
+tasks.named("preBuild") { dependsOn(bundleThumbRuntime, buildOverlayDex) }
 
 // A release must never ship a developer runtime (tools/build-android.sh --dev),
 // which has the OBB-over-adb shortcut and debug sampling compiled in.

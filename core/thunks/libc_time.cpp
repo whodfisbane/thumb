@@ -6,6 +6,7 @@
 #include <cwchar>
 
 #include "thunks/libc_internal.h"
+#include "thunks/timescale.h"
 #include "thunks/thunks.h"
 
 namespace h32 {
@@ -28,23 +29,28 @@ std::tm tm_from_guest(gaddr g) {
     return t;
 }
 
+int64_t virtual_now_ns(clockid_t c) {
+    timespec ts;
+    clock_gettime(c, &ts);
+    return timescale::virtual_ns(c, int64_t(ts.tv_sec) * 1000000000 + ts.tv_nsec);
+}
+
 void t_time(GuestThread& t) {
-    time_t now = std::time(nullptr);
+    time_t now = time_t(virtual_now_ns(CLOCK_REALTIME) / 1000000000);
     if (gaddr p = t.regs()[0]) mem().write<int32_t>(p, int32_t(now));
     set_ret32(t, uint32_t(now));
 }
 
 void t_gettimeofday(GuestThread& t) {
-    timeval tv;
-    ::gettimeofday(&tv, nullptr);
+    int64_t ns = virtual_now_ns(CLOCK_REALTIME);
     if (gaddr p = t.regs()[0]) {
-        mem().write<int32_t>(p, int32_t(tv.tv_sec));
-        mem().write<int32_t>(p + 4, int32_t(tv.tv_usec));
+        mem().write<int32_t>(p, int32_t(ns / 1000000000));
+        mem().write<int32_t>(p + 4, int32_t((ns / 1000) % 1000000));
     }
     set_ret32(t, 0);
 }
 
-void t_clock(GuestThread& t) { set_ret32(t, uint32_t(std::clock())); }
+void t_clock(GuestThread& t) { set_ret32(t, uint32_t(double(std::clock()) * timescale::scale())); }
 
 void t_difftime(GuestThread& t) {
     double d = double(int32_t(t.regs()[0])) - double(int32_t(t.regs()[1]));

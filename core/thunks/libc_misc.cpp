@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "loader/elf_loader.h"
+#include "thunks/timescale.h"
 #ifdef __ANDROID__
 #include <sys/system_properties.h>
 #endif
@@ -139,8 +140,11 @@ void t_dladdr(GuestThread& t) {
     set_ret32(t, 1);
 }
 
-void t_sleep(GuestThread& t) { set_ret32(t, ::sleep(t.regs()[0])); }
-void t_usleep(GuestThread& t) { set_ret32(t, uint32_t(::usleep(t.regs()[0]))); }
+void t_sleep(GuestThread& t) {
+    ::usleep(useconds_t(timescale::real_sleep_ns(int64_t(t.regs()[0]) * 1000000000) / 1000));
+    set_ret32(t, 0);
+}
+void t_usleep(GuestThread& t) { set_ret32(t, uint32_t(::usleep(useconds_t(timescale::real_sleep_ns(int64_t(t.regs()[0]) * 1000) / 1000)))); }
 
 // int vasprintf(char** out, const char* fmt, va_list ap)
 void t_vasprintf(GuestThread& t) {
@@ -241,7 +245,8 @@ void t_sigaction(GuestThread& t) {                  // (sig, const sigaction* ac
 // int nanosleep(const struct timespec* req, struct timespec* rem) — 32-bit timespec
 void t_nanosleep(GuestThread& t) {
     gaddr req = t.regs()[0];
-    timespec ts{mem().read<int32_t>(req), mem().read<int32_t>(req + 4)};
+    int64_t want = timescale::real_sleep_ns(int64_t(mem().read<int32_t>(req)) * 1000000000 + mem().read<int32_t>(req + 4));
+    timespec ts{time_t(want / 1000000000), long(want % 1000000000)};
     timespec rem{};
     int r = ::nanosleep(&ts, &rem);
     if (gaddr out = t.regs()[1]) {
@@ -254,10 +259,12 @@ void t_nanosleep(GuestThread& t) {
 
 void t_clock_gettime(GuestThread& t) {
     timespec ts;
-    int r = ::clock_gettime(clockid_t(t.regs()[0]), &ts);
+    clockid_t clock = clockid_t(t.regs()[0]);
+    int r = ::clock_gettime(clock, &ts);
     if (r == 0) {
-        mem().write<int32_t>(t.regs()[1], int32_t(ts.tv_sec));
-        mem().write<int32_t>(t.regs()[1] + 4, int32_t(ts.tv_nsec));
+        int64_t ns = timescale::virtual_ns(clock, int64_t(ts.tv_sec) * 1000000000 + ts.tv_nsec);
+        mem().write<int32_t>(t.regs()[1], int32_t(ns / 1000000000));
+        mem().write<int32_t>(t.regs()[1] + 4, int32_t(ns % 1000000000));
     } else {
         sync_guest_errno(t);
     }

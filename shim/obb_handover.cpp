@@ -32,7 +32,17 @@ std::string to_string(JNIEnv* env, jstring s) {
     return out;
 }
 
-jobject current_application(JNIEnv* env) {
+}  // namespace
+
+jobject thumb_current_application(JNIEnv* env);
+
+namespace {
+
+jobject current_application(JNIEnv* env) { return thumb_current_application(env); }
+
+}  // namespace
+
+jobject thumb_current_application(JNIEnv* env) {
     jclass at = env->FindClass("android/app/ActivityThread");
     if (clear(env) || !at) return nullptr;
     jmethodID m = env->GetStaticMethodID(at, "currentApplication", "()Landroid/app/Application;");
@@ -41,6 +51,7 @@ jobject current_application(JNIEnv* env) {
     return clear(env) ? nullptr : app;
 }
 
+namespace {
 }  // namespace
 
 // Copies content://dev.thumb.app.obb/<pkg>/main.<versionCode>.<pkg>.obb into the

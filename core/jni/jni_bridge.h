@@ -43,6 +43,9 @@ jint call_JNI_OnLoad(gaddr fn, JNIEnv* env);
 // Returns how many were registered.
 int register_java_exports(JNIEnv* env, const std::vector<std::pair<std::string, gaddr>>& exports);
 
+// Turns blocking of ad-related Java methods on or off at runtime.
+void set_ad_block(bool on);
+
 // Java methods whose name contains any of these substrings are blocked.
 void set_blocked_methods(std::vector<std::string> patterns);
 

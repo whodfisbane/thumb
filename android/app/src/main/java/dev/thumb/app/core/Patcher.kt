@@ -19,7 +19,10 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
         const val MIN_TARGET_SDK = 24
     }
 
-    fun patch(input: File, output: File, log: (String) -> Unit = {}): Result {
+    /** Extra content for the base APK: the in-game menu dex and the options file. */
+    class BaseExtras(val overlayDex: ByteArray?, val optionsJson: String)
+
+    fun patch(input: File, output: File, base: BaseExtras? = null, log: (String) -> Unit = {}): Result {
         val started = System.nanoTime()
         var copied = 0
         var copiedBytes = 0L
@@ -30,12 +33,14 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
             output.outputStream().buffered(1 shl 16).use { os ->
                 AlignedZipWriter(os).use { out ->
                     val armLibs = ArrayList<ZipEntry>()
+                    var maxDex = 0
                     for (e in src.entries()) {
                         val name = e.name
                         when {
                             e.isDirectory -> Unit
                             name.startsWith("lib/") -> if (name.startsWith("lib/armeabi-v7a/") && name.endsWith(".so")) armLibs += e
                             name.startsWith("META-INF/") && isSignatureFile(name) -> Unit // old signature
+                            base != null && name == "assets/thumb/options.json" -> Unit // replaced below
                             name == "AndroidManifest.xml" -> {
                                 val r = ManifestPatcher.patch(src.getInputStream(e).readBytes(), MIN_TARGET_SDK)
                                 targetOld = r.oldTarget
@@ -45,11 +50,24 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
                                 out.addDeflated(name, r.bytes, e.time)
                             }
                             else -> {
+                                Regex("^classes(\\d*)\\.dex$").find(name)?.let { m ->
+                                    maxDex = maxOf(maxDex, m.groupValues[1].ifEmpty { "1" }.toInt())
+                                }
                                 val data = src.getInputStream(e).readBytes()
                                 if (e.method == ZipEntry.STORED) out.addStored(name, data, e.time) else out.addDeflated(name, data, e.time)
                                 copied++
                                 copiedBytes += data.size
                             }
+                        }
+                    }
+                    if (base != null) {
+                        val now = System.currentTimeMillis()
+                        out.addDeflated("assets/thumb/options.json", base.optionsJson.toByteArray(), now)
+                        log("added THUMB options (assets/thumb/options.json)")
+                        base.overlayDex?.let { dex ->
+                            val name = "classes${maxDex + 1}.dex"
+                            out.addDeflated(name, dex, now)
+                            log("added the THUMB in-game menu as $name (${dex.size / 1024} KB)")
                         }
                     }
                     if (armLibs.isEmpty()) {
