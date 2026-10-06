@@ -79,6 +79,10 @@ public:
 
     ~GuestThread();
 
+    // Drops translated code for [start, start+size) in every JIT (self-modifying
+    // or self-decrypting guest code, e.g. after mprotect).
+    static void invalidate_code(gaddr start, uint32_t size);
+
     // Calls guest function `fn` (bit 0 set = Thumb) and runs until it returns.
     GuestResult call(gaddr fn, const GuestArgs& args = {});
 

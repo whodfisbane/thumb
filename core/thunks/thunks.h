@@ -39,6 +39,7 @@ void dump_stats(size_t top);
 void register_all();
 
 // Per-family registration (one per source file).
+void register_syscalls();  // must run first: owns SVC 0
 void register_libc_core();
 void register_libc_string();
 void register_libc_stdio();

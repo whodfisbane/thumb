@@ -12,12 +12,17 @@ Built gaming-first: the first app it ran was **Worms 3** (`com.worms3.app` 2.1).
 
 ## Status
 
+**Worms 3 is playable on a Pixel 9a (GrapheneOS, Android 17)**: graphics, audio, touch, 60 fps. 🎉
+
 | Milestone | State |
 |---|---|
-| ELF loader + JIT runs a game's constructors and `JNI_OnLoad` | ✅ (Worms 3: 678 constructors, 45 natives) |
-| libc / zlib / JNI thunks; game boots and renders frames in the Linux harness | 🟡 (600 frames, text rendering WIP) |
-| Android runtime + APK repackaging | 🚧 |
-| Playable on a phone | ⏳ |
+| ELF loader + JIT runs a game's constructors and `JNI_OnLoad` | ✅ |
+| libc / zlib / JNI thunks, Linux test harness | ✅ |
+| Raw syscalls, self-unpacking (packed) libraries, exported `Java_*` natives | ✅ |
+| Android runtime + APK repackaging | ✅ |
+| Playable on a phone | ✅ Worms 3 |
+| THUMB app (import APK/OBB on the phone, per-game options) | ⏳ |
+| More games and apps | ⏳ |
 
 ## Layout
 

@@ -36,12 +36,15 @@ struct Module {
 // Loads `bytes` as module `name`. Imports resolve against previously loaded
 // modules first, then thunks. Returns nullptr on a malformed file.
 Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name);
-Module* load_module_file(const std::string& path);
+// `name` defaults to the file name; THUMB passes the original name
+// ("libfoo.so" for libfoo_arm32.so) so the guest sees itself as it expects.
+Module* load_module_file(const std::string& path, const std::string& name = "");
 
 // Runs DT_INIT and DT_INIT_ARRAY on the calling thread.
 void run_constructors(Module& m);
 
 Module* find_module(std::string_view name);
+std::vector<Module*> all_modules();
 Module* module_containing(gaddr a);
 // "libfoo.so+0x1234 (symbol+0x10)" or "" if `a` is not in any module.
 std::string symbolize(gaddr a);

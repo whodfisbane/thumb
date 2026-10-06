@@ -38,6 +38,11 @@ private:
 // Calls a guest JNI_OnLoad(JavaVM*, void*) and returns its result.
 jint call_JNI_OnLoad(gaddr fn, JNIEnv* env);
 
+// Registers exported "Java_<class>_<method>" functions (the pre-RegisterNatives
+// way of binding natives) with the JVM; signatures come from reflection.
+// Returns how many were registered.
+int register_java_exports(JNIEnv* env, const std::vector<std::pair<std::string, gaddr>>& exports);
+
 // Java methods whose name contains any of these substrings are blocked.
 void set_blocked_methods(std::vector<std::string> patterns);
 

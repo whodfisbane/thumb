@@ -509,6 +509,33 @@ std::string class_name(JNIEnv* env, jclass cls) {
     return out;
 }
 
+// Creates the host trampoline for one guest native method.
+NativeMethod* make_native(const std::string& cname, const std::string& name, const std::string& sig, gaddr guest_fn) {
+    auto* nm = new NativeMethod();
+    nm->info.class_name = cname;
+    nm->info.name = name;
+    nm->info.signature = sig;
+    nm->info.guest_fn = guest_fn;
+    if (!parse_signature(sig.c_str(), nm->args, nm->ret)) {
+        H32_ERROR("jni: bad native signature %s", sig.c_str());
+        delete nm;
+        return nullptr;
+    }
+    nm->types.push_back(&ffi_type_pointer);  // JNIEnv*
+    nm->types.push_back(&ffi_type_pointer);  // jobject / jclass
+    for (char c : nm->args) nm->types.push_back(ffi_for(c));
+    void* code = nullptr;
+    auto* closure = static_cast<ffi_closure*>(ffi_closure_alloc(sizeof(ffi_closure), &code));
+    if (!closure || ffi_prep_cif(&nm->cif, FFI_DEFAULT_ABI, unsigned(nm->types.size()), ffi_for(nm->ret), nm->types.data()) != FFI_OK ||
+        ffi_prep_closure_loc(closure, &nm->cif, native_trampoline, nm, code) != FFI_OK)
+        fatal("jni: libffi closure setup failed");
+    nm->info.host_fn = code;
+    H32_INFO("jni: native %s.%s %s -> %s", cname.c_str(), name.c_str(), sig.c_str(), describe_address(guest_fn).c_str());
+    std::lock_guard lk(g_natives_mutex);
+    g_natives.push_back(nm);
+    return nm;
+}
+
 // jint RegisterNatives(JNIEnv*, jclass, const JNINativeMethod*, jint)
 void t_register_natives(GuestThread& t) {
     JNIEnv* env = host_env();
@@ -516,34 +543,93 @@ void t_register_natives(GuestThread& t) {
     gaddr methods = t.regs()[2];
     jint n = jint(t.regs()[3]);
     std::string cname = class_name(env, cls);
-    std::vector<JNINativeMethod> host(size_t(n > 0 ? n : 0));
+    std::vector<JNINativeMethod> host;
     for (jint i = 0; i < n; i++) {
         gaddr e = methods + gaddr(i) * 12;
-        auto* nm = new NativeMethod();
-        nm->info.class_name = cname;
-        nm->info.name = mem().str(mem().read<uint32_t>(e));
-        nm->info.signature = mem().str(mem().read<uint32_t>(e + 4));
-        nm->info.guest_fn = mem().read<uint32_t>(e + 8);
-        if (!parse_signature(nm->info.signature.c_str(), nm->args, nm->ret)) {
-            H32_ERROR("jni: bad native signature %s", nm->info.signature.c_str());
-            return set_ret32(t, uint32_t(JNI_ERR));
-        }
-        nm->types.push_back(&ffi_type_pointer);  // JNIEnv*
-        nm->types.push_back(&ffi_type_pointer);  // jobject / jclass
-        for (char c : nm->args) nm->types.push_back(ffi_for(c));
-        void* code = nullptr;
-        auto* closure = static_cast<ffi_closure*>(ffi_closure_alloc(sizeof(ffi_closure), &code));
-        if (!closure || ffi_prep_cif(&nm->cif, FFI_DEFAULT_ABI, unsigned(nm->types.size()), ffi_for(nm->ret), nm->types.data()) != FFI_OK ||
-            ffi_prep_closure_loc(closure, &nm->cif, native_trampoline, nm, code) != FFI_OK)
-            fatal("jni: libffi closure setup failed");
-        nm->info.host_fn = code;
-        host[size_t(i)] = {nm->info.name.c_str(), nm->info.signature.c_str(), code};
-        H32_INFO("jni: RegisterNatives %s.%s %s -> %s", cname.c_str(), nm->info.name.c_str(), nm->info.signature.c_str(),
-                 describe_address(nm->info.guest_fn).c_str());
-        std::lock_guard lk(g_natives_mutex);
-        g_natives.push_back(nm);
+        NativeMethod* nm = make_native(cname, mem().str(mem().read<uint32_t>(e)), mem().str(mem().read<uint32_t>(e + 4)),
+                                       mem().read<uint32_t>(e + 8));
+        if (!nm) return set_ret32(t, uint32_t(JNI_ERR));
+        host.push_back({nm->info.name.c_str(), nm->info.signature.c_str(), nm->info.host_fn});
     }
-    set_ret32(t, uint32_t(env->RegisterNatives(cls, host.data(), n)));
+    set_ret32(t, uint32_t(env->RegisterNatives(cls, host.data(), jint(host.size()))));
+}
+
+// ------------------------------------------- exported Java_* functions ----
+
+// Decodes a JNI short name ("Java_com_foo_Bar_baz") into class and method.
+// Escapes: _1 '_', _2 ';', _3 '[', _0xxxx unicode. Overloaded names
+// ("__" + signature) are not supported.
+bool decode_jni_name(std::string_view sym, std::string& cls, std::string& method) {
+    if (sym.substr(0, 5) != "Java_") return false;
+    std::vector<std::string> parts(1);
+    for (size_t i = 5; i < sym.size(); i++) {
+        char c = sym[i];
+        if (c != '_') {
+            parts.back() += c;
+            continue;
+        }
+        char n = i + 1 < sym.size() ? sym[i + 1] : 0;
+        if (n == '1') { parts.back() += '_'; i++; }
+        else if (n == '2') { parts.back() += ';'; i++; }
+        else if (n == '3') { parts.back() += '['; i++; }
+        else if (n == '0' && i + 5 < sym.size()) {
+            unsigned cp = unsigned(std::stoul(std::string(sym.substr(i + 2, 4)), nullptr, 16));
+            parts.back() += cp < 0x80 ? char(cp) : '?';
+            i += 5;
+        } else if (n == '_') {
+            return false;  // overloaded: name__signature
+        } else {
+            parts.emplace_back();
+        }
+    }
+    if (parts.size() < 2) return false;
+    method = parts.back();
+    parts.pop_back();
+    cls.clear();
+    for (auto& p : parts) cls += (cls.empty() ? "" : "/") + p;
+    return true;
+}
+
+std::string type_descriptor(JNIEnv* env, jclass type) {
+    std::string n = class_name(env, type);
+    static const std::pair<const char*, const char*> prims[] = {{"int", "I"},   {"boolean", "Z"}, {"byte", "B"},
+                                                                {"char", "C"},  {"short", "S"},   {"long", "J"},
+                                                                {"float", "F"}, {"double", "D"},  {"void", "V"}};
+    for (auto& [name, d] : prims)
+        if (n == name) return d;
+    for (auto& c : n)
+        if (c == '.') c = '/';
+    return n[0] == '[' ? n : "L" + n + ";";
+}
+
+// Finds the signature of native method `name` in `cls` via reflection.
+std::string reflect_native_signature(JNIEnv* env, jclass cls, const std::string& name) {
+    jclass class_cls = env->FindClass("java/lang/Class");
+    jclass method_cls = env->FindClass("java/lang/reflect/Method");
+    if (!class_cls || !method_cls) return "";
+    jmethodID get_methods = env->GetMethodID(class_cls, "getDeclaredMethods", "()[Ljava/lang/reflect/Method;");
+    jmethodID get_name = env->GetMethodID(method_cls, "getName", "()Ljava/lang/String;");
+    jmethodID get_mods = env->GetMethodID(method_cls, "getModifiers", "()I");
+    jmethodID get_params = env->GetMethodID(method_cls, "getParameterTypes", "()[Ljava/lang/Class;");
+    jmethodID get_ret = env->GetMethodID(method_cls, "getReturnType", "()Ljava/lang/Class;");
+    if (!get_methods || !get_name || !get_mods || !get_params || !get_ret) return "";
+    auto methods = static_cast<jobjectArray>(env->CallObjectMethod(cls, get_methods));
+    if (!methods) return "";
+    std::string found;
+    for (jsize i = 0, n = env->GetArrayLength(methods); i < n && found.empty(); i++) {
+        jobject m = env->GetObjectArrayElement(methods, i);
+        auto mname = static_cast<jstring>(env->CallObjectMethod(m, get_name));
+        const char* c = mname ? env->GetStringUTFChars(mname, nullptr) : nullptr;
+        bool match = c && name == c && (env->CallIntMethod(m, get_mods) & 0x100 /* NATIVE */);
+        if (c) env->ReleaseStringUTFChars(mname, c);
+        if (!match) continue;
+        auto params = static_cast<jobjectArray>(env->CallObjectMethod(m, get_params));
+        found = "(";
+        for (jsize p = 0, np = params ? env->GetArrayLength(params) : 0; p < np; p++)
+            found += type_descriptor(env, static_cast<jclass>(env->GetObjectArrayElement(params, p)));
+        found += ")" + type_descriptor(env, static_cast<jclass>(env->CallObjectMethod(m, get_ret)));
+    }
+    return found;
 }
 
 // --------------------------------------------------------- JavaVM table ----
@@ -632,6 +718,36 @@ void init(JavaVM* host_vm) {
         mem().write<uint32_t>(g_guest_vm, vm_table);
         H32_INFO("jni: guest JavaVM at 0x%08x, JNIEnv at 0x%08x", g_guest_vm, g_guest_env);
     });
+}
+
+int register_java_exports(JNIEnv* env, const std::vector<std::pair<std::string, gaddr>>& exports) {
+    EnvScope scope(env);
+    int registered = 0;
+    for (auto& [sym, fn] : exports) {
+        std::string cls_name, method;
+        if (!decode_jni_name(sym, cls_name, method)) {
+            if (sym.compare(0, 5, "Java_") == 0) H32_WARN("jni: cannot decode %s (overloaded?)", sym.c_str());
+            continue;
+        }
+        jclass cls = env->FindClass(cls_name.c_str());
+        if (!cls) {
+            env->ExceptionClear();
+            H32_WARN("jni: %s: class %s not found", sym.c_str(), cls_name.c_str());
+            continue;
+        }
+        std::string sig = reflect_native_signature(env, cls, method);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (sig.empty()) {
+            H32_WARN("jni: %s: no native method %s in %s", sym.c_str(), method.c_str(), cls_name.c_str());
+            continue;
+        }
+        NativeMethod* nm = make_native(cls_name, method, sig, fn);
+        if (!nm) continue;
+        JNINativeMethod m{nm->info.name.c_str(), nm->info.signature.c_str(), nm->info.host_fn};
+        if (env->RegisterNatives(cls, &m, 1) == JNI_OK) registered++;
+        else env->ExceptionClear();
+    }
+    return registered;
 }
 
 jint call_JNI_OnLoad(gaddr fn, JNIEnv* env) {

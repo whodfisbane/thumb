@@ -151,6 +151,7 @@ void dump_stats(size_t top) {
 void register_all() {
     static std::once_flag once;
     std::call_once(once, [] {
+        register_syscalls();
         register_libc_core();
         register_libc_string();
         register_libc_stdio();

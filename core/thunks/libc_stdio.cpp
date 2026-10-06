@@ -1,9 +1,15 @@
 // <stdio.h>, file system calls, directories.
 #include <dirent.h>
 #include <fcntl.h>
+#ifdef __ANDROID__
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -28,12 +34,104 @@ void add_path_mapping(const std::string& guest_prefix, const std::string& host_p
     H32_INFO("path map: %s -> %s", guest_prefix.c_str(), host_prefix.c_str());
 }
 
+#ifdef __ANDROID__
+namespace {
+
+// Developer convenience: if a file under Android/obb/ is missing, fetch it
+// once from http://127.0.0.1:47070/<name>. With `adb reverse tcp:47070
+// tcp:47070` that port tunnels to a PC serving the OBB, which avoids having
+// to copy it into another user's protected storage by hand.
+constexpr uint16_t kObbFetchPort = 47070;
+
+bool fetch_from_dev_host(const std::string& path) {
+    std::string name = path.substr(path.find_last_of('/') + 1);
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(kObbFetchPort);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0) {
+        close(fd);
+        return false;  // nothing listening: the normal case
+    }
+    H32_INFO("obb: %s missing, fetching from dev host", path.c_str());
+    std::string req = "GET /" + name + " HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n";
+    if (write(fd, req.data(), req.size()) != ssize_t(req.size())) {
+        close(fd);
+        return false;
+    }
+    std::string dir = path.substr(0, path.find_last_of('/'));
+    ::mkdir(dir.c_str(), 0770);
+    std::string part = path + ".part";
+    FILE* out = std::fopen(part.c_str(), "wb");
+    if (!out) {
+        H32_ERROR("obb: cannot create %s: %s", part.c_str(), std::strerror(errno));
+        close(fd);
+        return false;
+    }
+    std::vector<char> buf(1 << 20);
+    std::string header;
+    bool in_body = false, ok = false;
+    size_t total = 0;
+    for (ssize_t n; (n = read(fd, buf.data(), buf.size())) > 0;) {
+        const char* data = buf.data();
+        size_t len = size_t(n);
+        if (!in_body) {
+            header.append(data, len);
+            auto end = header.find("\r\n\r\n");
+            if (end == std::string::npos) continue;
+            ok = header.compare(0, 12, "HTTP/1.0 200") == 0 || header.compare(0, 12, "HTTP/1.1 200") == 0;
+            if (!ok) break;
+            in_body = true;
+            std::string body = header.substr(end + 4);
+            std::fwrite(body.data(), 1, body.size(), out);
+            total += body.size();
+            continue;
+        }
+        std::fwrite(data, 1, len, out);
+        total += len;
+    }
+    close(fd);
+    std::fclose(out);
+    if (!ok || total == 0) {
+        H32_ERROR("obb: dev host did not serve %s", name.c_str());
+        ::unlink(part.c_str());
+        return false;
+    }
+    if (std::rename(part.c_str(), path.c_str()) != 0) {
+        H32_ERROR("obb: rename failed: %s", std::strerror(errno));
+        return false;
+    }
+    H32_INFO("obb: fetched %s (%zu MB)", name.c_str(), total >> 20);
+    return true;
+}
+
+void maybe_fetch_obb(const std::string& path) {
+    static std::mutex m;
+    static std::vector<std::string> tried;
+    if (path.find("/Android/obb/") == std::string::npos) return;
+    std::lock_guard lk(m);
+    if (std::find(tried.begin(), tried.end(), path) != tried.end()) return;
+    tried.push_back(path);
+    if (::access(path.c_str(), F_OK) == 0) return;
+    fetch_from_dev_host(path);
+}
+
+}  // namespace
+#endif
+
 std::string map_path(const char* p) {
     if (!p) return {};
     std::string s = p;
-    std::lock_guard lk(g_path_mutex);
-    for (auto& [from, to] : g_path_map)
-        if (s.compare(0, from.size(), from) == 0) return to + s.substr(from.size());
+    {
+        std::lock_guard lk(g_path_mutex);
+        for (auto& [from, to] : g_path_map)
+            if (s.compare(0, from.size(), from) == 0) return to + s.substr(from.size());
+    }
+#ifdef __ANDROID__
+    maybe_fetch_obb(s);
+#endif
     return s;
 }
 
@@ -107,13 +205,21 @@ void guest_file_forget(gaddr f) {
 
 bool is_guest_console(gaddr f) { return f >= g_sF + bionic::kFileSize && f < g_sF + 3 * bionic::kFileSize; }
 
+FILE* guest_proc_maps();
 namespace {
+FILE* guest_proc_maps_file() { return guest_proc_maps(); }
 
 // ---------------------------------------------------------------- stdio ----
+
+FILE* guest_proc_maps_file();
 
 void t_fopen(GuestThread& t) {
     std::string path = map_path(mem().str(t.regs()[0]));
     const char* mode = mem().str(t.regs()[1]);
+    if (path == "/proc/self/maps" || path == "/proc/" + std::to_string(getpid()) + "/maps") {
+        H32_DEBUG("fopen(%s): synthesized guest view", path.c_str());
+        return set_ret32(t, guest_file_wrap(guest_proc_maps_file()));
+    }
     errno = 0;
     FILE* f = std::fopen(path.c_str(), mode);
     sync_guest_errno(t);

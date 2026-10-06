@@ -5,6 +5,8 @@
 
 #include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "common.h"
 #include "cpu/cpu.h"
@@ -29,13 +31,17 @@ extern "C" __attribute__((visibility("default"))) jint thumb_load(JavaVM* vm, co
         return JNI_ERR;
     }
 
-    if (Module* existing = find_module(guest_name)) {
+    // The guest should see itself under its original name: libfoo_arm32.so -> libfoo.so
+    std::string original = guest_name;
+    if (auto pos = original.rfind("_arm32.so"); pos != std::string::npos) original.replace(pos, 9, ".so");
+
+    if (Module* existing = find_module(original)) {
         H32_WARN("%s already loaded", guest_name);
         (void)existing;
         return JNI_VERSION_1_6;
     }
 
-    Module* mod = load_module_file(std::string(dir) + "/" + guest_name);
+    Module* mod = load_module_file(std::string(dir) + "/" + guest_name, original);
     if (!mod) {
         H32_ERROR("thumb_load: could not load %s", guest_name);
         return JNI_ERR;
@@ -43,6 +49,15 @@ extern "C" __attribute__((visibility("default"))) jint thumb_load(JavaVM* vm, co
 
     jni::EnvScope scope(env);
     run_constructors(*mod);
+    // Natives bound by symbol name: Java can't find them in our stub, so
+    // register them explicitly.
+    std::vector<std::pair<std::string, gaddr>> java_exports;
+    for (auto& [name, addr] : mod->exports)
+        if (name.compare(0, 5, "Java_") == 0) java_exports.emplace_back(name, addr);
+    if (!java_exports.empty())
+        H32_INFO("%s: registered %d of %zu exported Java_ natives", original.c_str(), jni::register_java_exports(env, java_exports),
+                 java_exports.size());
+
     auto onload = mod->find("JNI_OnLoad");
     if (!onload) return JNI_VERSION_1_6;
     return jni::call_JNI_OnLoad(*onload, env);

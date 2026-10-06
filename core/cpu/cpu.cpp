@@ -49,6 +49,10 @@ private:
 };
 ProcessorIds g_ids;
 
+// Every live JIT, so code invalidation can reach all threads.
+std::mutex g_jits_mutex;
+std::vector<Dynarmic::A32::Jit*> g_jits;
+
 }  // namespace
 
 struct Callbacks final : Dynarmic::A32::UserCallbacks {
@@ -202,6 +206,10 @@ GuestThread::GuestThread() {
 }
 
 GuestThread::~GuestThread() {
+    {
+        std::lock_guard lk(g_jits_mutex);
+        for (auto& f : frames_) std::erase(g_jits, f->jit.get());
+    }
     for (auto& f : frames_) g_ids.release(f->processor_id);
     mem().free(stack_base_);
     mem().free(errno_addr_);
@@ -225,9 +233,18 @@ GuestThread::Frame& GuestThread::frame_at(int depth) {
         cfg.code_cache_size = frames_.empty() ? 64 * 1024 * 1024 : 16 * 1024 * 1024;
         cfg.arch_version = Dynarmic::A32::ArchVersion::v7;
         f->jit = std::make_unique<Dynarmic::A32::Jit>(cfg);
+        {
+            std::lock_guard lk(g_jits_mutex);
+            g_jits.push_back(f->jit.get());
+        }
         frames_.push_back(std::move(f));
     }
     return *frames_[depth];
+}
+
+void GuestThread::invalidate_code(gaddr start, uint32_t size) {
+    std::lock_guard lk(g_jits_mutex);
+    for (auto* jit : g_jits) jit->InvalidateCacheRange(start, size);
 }
 
 GuestResult GuestThread::call(gaddr fn, const GuestArgs& args) {
@@ -266,7 +283,7 @@ GuestResult GuestThread::call(gaddr fn, const GuestArgs& args) {
             f.jit->SetCpsr(f.jump_cpsr);
             continue;
         }
-        H32_WARN("guest halted for no known reason, resuming");
+        // e.g. a code-cache invalidation requested while running: just resume.
     }
     active_--;
     return {r[0], r[1]};

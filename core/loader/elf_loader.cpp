@@ -221,14 +221,14 @@ Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name) 
     return g_modules.back().get();
 }
 
-Module* load_module_file(const std::string& path) {
+Module* load_module_file(const std::string& path, const std::string& name_override) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         H32_ERROR("cannot open %s", path.c_str());
         return nullptr;
     }
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    std::string name = path.substr(path.find_last_of('/') + 1);
+    std::string name = name_override.empty() ? path.substr(path.find_last_of('/') + 1) : name_override;
     return load_module(bytes, name);
 }
 
@@ -249,6 +249,13 @@ Module* find_module(std::string_view name) {
     for (auto& mod : g_modules)
         if (mod->name == name) return mod.get();
     return nullptr;
+}
+
+std::vector<Module*> all_modules() {
+    std::lock_guard lk(g_modules_mutex);
+    std::vector<Module*> out;
+    for (auto& mod : g_modules) out.push_back(mod.get());
+    return out;
 }
 
 Module* module_containing(gaddr a) {

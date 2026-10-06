@@ -3,6 +3,8 @@
 #include <pthread.h>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -45,6 +47,52 @@ void t_mutex_lock(GuestThread& t) {
 void t_mutex_trylock(GuestThread& t) { set_ret32(t, host_mutex(t.regs()[0])->try_lock() ? 0 : EBUSY); }
 void t_mutex_unlock(GuestThread& t) {
     host_mutex(t.regs()[0])->unlock();
+    set_ret32(t, 0);
+}
+
+// ---- condition variables (guest pthread_cond_t is 4 bytes) ----
+std::mutex g_cond_table_lock;
+std::unordered_map<gaddr, std::condition_variable_any*> g_conds;
+
+std::condition_variable_any* host_cond(gaddr g) {
+    std::lock_guard lk(g_cond_table_lock);
+    auto& c = g_conds[g];
+    if (!c) c = new std::condition_variable_any();
+    return c;
+}
+
+void t_cond_init(GuestThread& t) {
+    host_cond(t.regs()[0]);
+    set_ret32(t, 0);
+}
+void t_cond_destroy(GuestThread& t) {
+    std::lock_guard lk(g_cond_table_lock);
+    auto it = g_conds.find(t.regs()[0]);
+    if (it != g_conds.end()) {
+        delete it->second;
+        g_conds.erase(it);
+    }
+    set_ret32(t, 0);
+}
+void t_cond_wait(GuestThread& t) {
+    host_cond(t.regs()[0])->wait(*host_mutex(t.regs()[1]));
+    set_ret32(t, 0);
+}
+// int pthread_cond_timedwait(cond, mutex, const struct timespec* abstime) — 32-bit timespec, CLOCK_REALTIME
+void t_cond_timedwait(GuestThread& t) {
+    gaddr ts = t.regs()[2];
+    auto since_epoch = std::chrono::seconds(mem().read<int32_t>(ts)) + std::chrono::nanoseconds(mem().read<int32_t>(ts + 4));
+    auto deadline = std::chrono::system_clock::time_point(
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(since_epoch));
+    auto r = host_cond(t.regs()[0])->wait_until(*host_mutex(t.regs()[1]), deadline);
+    set_ret32(t, r == std::cv_status::timeout ? ETIMEDOUT : 0);
+}
+void t_cond_signal(GuestThread& t) {
+    host_cond(t.regs()[0])->notify_one();
+    set_ret32(t, 0);
+}
+void t_cond_broadcast(GuestThread& t) {
+    host_cond(t.regs()[0])->notify_all();
     set_ret32(t, 0);
 }
 
@@ -146,6 +194,12 @@ void register_libc_pthread() {
     add("pthread_mutex_trylock", t_mutex_trylock);
     add("pthread_mutex_unlock", t_mutex_unlock);
     add("pthread_once", t_once);
+    add("pthread_cond_init", t_cond_init);
+    add("pthread_cond_destroy", t_cond_destroy);
+    add("pthread_cond_wait", t_cond_wait);
+    add("pthread_cond_timedwait", t_cond_timedwait);
+    add("pthread_cond_signal", t_cond_signal);
+    add("pthread_cond_broadcast", t_cond_broadcast);
     add("pthread_key_create", t_key_create);
     add("pthread_key_delete", t_key_delete);
     add("pthread_getspecific", t_getspecific);
