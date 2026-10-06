@@ -505,6 +505,7 @@ void t_opendir(GuestThread& t) {
     errno = 0;
     DIR* d = ::opendir(p.c_str());
     sync_guest_errno(t);
+    H32_DEBUG("opendir(\"%s\") -> %s", p.c_str(), d ? "ok" : std::strerror(errno));
     if (!d) return set_ret32(t, 0);
     gaddr g = mem().calloc(1, kDirentSize);
     std::lock_guard lk(g_dirs_mutex);
@@ -518,6 +519,7 @@ void t_readdir(GuestThread& t) {
     if (!d) return set_ret32(t, 0);
     dirent* e = ::readdir(d);
     if (!e) return set_ret32(t, 0);
+    H32_DEBUG("readdir -> \"%s\" type %u", e->d_name, e->d_type);
     auto& m = mem();
     m.write<uint64_t>(g + 0, e->d_ino);
     m.write<int64_t>(g + 8, e->d_off);
