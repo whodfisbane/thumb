@@ -20,13 +20,18 @@ object Installer {
         data class Failure(val status: Int, val message: String) : Outcome()
     }
 
-    suspend fun install(context: Context, apk: File): Outcome = install(context, listOf(apk))
-
-    /** Installs a base APK plus its splits in one session. */
-    suspend fun install(context: Context, apks: List<File>): Outcome {
+    /**
+     * Installs a base APK plus its splits in one session. [onConfirm] receives
+     * Android's confirmation screen intent (so the UI can reopen it if it
+     * didn't show up).
+     */
+    suspend fun install(context: Context, apks: List<File>, onConfirm: (Intent) -> Unit = {}): Outcome {
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         if (Build.VERSION.SDK_INT >= 34) params.setRequestUpdateOwnership(false)
+        // Updates of apps THUMB installed may skip the dialog (Android decides;
+        // first installs and apps targeting old Android versions still ask).
+        if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->
             for ((i, apk) in apks.withIndex()) {
@@ -45,7 +50,10 @@ object Installer {
                                 @Suppress("DEPRECATION")
                                 val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
                                 confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                if (confirm != null) ctx.startActivity(confirm)
+                                if (confirm != null) {
+                                    onConfirm(confirm)
+                                    ctx.startActivity(confirm)
+                                }
                             }
                             else -> {
                                 ctx.unregisterReceiver(this)

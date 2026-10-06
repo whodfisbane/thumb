@@ -43,7 +43,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     sealed class State {
         data object Idle : State()
-        data class Working(val message: String) : State()
+        /** [confirm]: Android's install confirmation screen, if one is pending. */
+        data class Working(val message: String, val confirm: Intent? = null) : State()
         data class Analyzed(val file: File, val bundle: dev.thumb.app.core.Bundle, val info: AppInfo, val report: Doctor.Report) : State()
         /** Installed, but the game's OBB data file isn't in place yet. */
         data class ObbNeeded(val info: AppInfo, val status: String? = null, val busy: Boolean = false) : State()
@@ -147,7 +148,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             _state.value = State.Working("Installing… confirm in the dialog")
             raw("install session started (${signed.size} APK(s))")
-            val outcome = Installer.install(context, signed)
+            val outcome = Installer.install(context, signed) { confirm ->
+                _state.value = State.Working("Installing… confirm in the dialog", confirm)
+            }
             withContext(Dispatchers.IO) { signed.forEach { it.delete() } }
             when (outcome) {
                 is Installer.Outcome.Success -> {

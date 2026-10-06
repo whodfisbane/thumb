@@ -155,7 +155,7 @@ private fun ThumbScreen(onToggleHolo: () -> Unit, vm: MainViewModel = viewModel(
         if (!holo) Header(onAbout = { aboutOpen = true })
         when (val s = state) {
             is State.Idle -> IdleCard { picker.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "*/*")) }
-            is State.Working -> WorkingCard(s.message, steps)
+            is State.Working -> WorkingCard(s, steps)
             is State.Analyzed -> ReportCard(s, onPatch = { vm.patchAndInstall(s) }, onCancel = vm::reset)
             is State.ObbNeeded -> ObbCard(s, vm)
             is State.Ready -> ReadyCard(s, steps, onAgain = vm::reset)
@@ -274,12 +274,25 @@ private fun IdleCard(onPick: () -> Unit) = PanelCard {
 }
 
 @Composable
-private fun WorkingCard(message: String, steps: List<String>) = PanelCard {
+private fun WorkingCard(s: State.Working, steps: List<String>) = PanelCard {
     Steps(steps)
     Row(verticalAlignment = Alignment.CenterVertically) {
         CircularProgressIndicator(Modifier.size(22.dp), color = accent(), strokeWidth = 3.dp)
         Spacer(Modifier.width(12.dp))
-        Text(message, fontWeight = FontWeight.Bold)
+        Text(s.message, fontWeight = FontWeight.Bold)
+    }
+    // If Android's install dialog didn't show up, offer to reopen it after a moment.
+    val confirm = s.confirm ?: return@PanelCard
+    var late by remember(confirm) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(confirm) {
+        kotlinx.coroutines.delay(4000)
+        late = true
+    }
+    if (late) {
+        val ctx = LocalContext.current
+        TTextButton(onClick = { ctx.startActivity(confirm) }, modifier = Modifier.fillMaxWidth()) {
+            Text(label("Dialog didn't appear? Tap here"))
+        }
     }
 }
 
