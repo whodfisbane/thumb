@@ -15,6 +15,7 @@ Built gaming-first: the first app it ran was **Worms 3** (`com.worms3.app` 2.1).
 ## Status
 
 **Worms 3 and ScummVM are playable on a Pixel 9a (GrapheneOS, Android 17)**: graphics, audio, touch. 🎉
+**No PC needed:** the THUMB app patches, signs and installs apps on the phone and hands games their OBB data.
 
 ### Compatibility
 

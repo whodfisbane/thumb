@@ -16,7 +16,7 @@ Where we are (2026-10-06): the translator runs **Worms 3 fully playable on a Pix
 - [ ] GitHub Actions: build the harness and run the tests, build `libthumb.so`, build the THUMB app
 - [ ] Release signing key (kept private) and reproducible release builds
 
-## Phase 1: THUMB app (no PC needed)
+## Phase 1: THUMB app (no PC needed): ✅ verified on device with Worms 3 (2026-10-06)
 
 - [x] Kotlin + Jetpack Compose app, arm64, minimum Android 10
 - [x] Import an app: pick an `.apk`, or a bundle (`.xapk` / `.apks` / `.apkm`)
@@ -24,12 +24,12 @@ Where we are (2026-10-06): the translator runs **Worms 3 fully playable on a Pix
 - [x] On-device patching: the same steps as `repack.py` (stubs + original libs + `libthumb.so`),
       handling split APKs (`config.armeabi_v7a`), signed with a per-device THUMB key via apksig
 - [x] Install through `PackageInstaller` sessions (works for split APKs)
-- [ ] OBB handling, automatic where possible:
-  - `.xapk` bundles often contain the OBB: import it automatically
-  - otherwise an "Add OBB" button with a file picker
-  - delivery: THUMB serves the OBB through a content provider protected by a signature
-    permission; the patched game's runtime copies it into its own OBB folder on first launch
-- [ ] Library screen: patched apps, status, re-patch after THUMB updates, uninstall
+- [x] OBB handling, automatic where possible:
+  - `.xapk` bundles often contain the OBB: imported automatically
+  - otherwise auto-search (chosen folder or full file access) or a file picker
+  - delivery: THUMB stores the OBB privately and grants the game read access; the runtime
+    copies it into the game's own OBB folder on first launch, then THUMB's copy is deleted
+- [ ] Library screen: patched apps, status, add OBB later, re-patch after THUMB updates, uninstall
 - [x] Console: full raw log with copy button (patching side)
 - [ ] Log viewer for the patched app's `thumb` runtime log
 
