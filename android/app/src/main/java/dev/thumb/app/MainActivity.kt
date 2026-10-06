@@ -484,10 +484,13 @@ private fun ReadyCard(s: State.Ready, steps: List<String>, onAgain: () -> Unit) 
     Text("✅ ${s.info.label} is ready", color = accent(), fontWeight = FontWeight.Black, fontSize = 20.sp)
     Steps(steps)
     s.obbNote?.let { Text(it, color = if (it.startsWith("No data")) Warn else Muted, fontSize = 13.sp) }
-    ctx.packageManager.getLaunchIntentForPackage(s.info.packageName)?.let { launch ->
-        TButton(onClick = { ctx.startActivity(launch) }, modifier = Modifier.fillMaxWidth()) { Text(label("Open ${s.info.label}"), fontWeight = FontWeight.Bold) }
+    // Side by side: start the app right away, or go patch another one.
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        ctx.packageManager.getLaunchIntentForPackage(s.info.packageName)?.let { launch ->
+            TButton(onClick = { ctx.startActivity(launch) }, modifier = Modifier.weight(1f)) { Text(label("Start app"), fontWeight = FontWeight.Bold) }
+        }
+        TOutlinedButton(onClick = onAgain, modifier = Modifier.weight(1f)) { Text(label("Add another app")) }
     }
-    TOutlinedButton(onClick = onAgain, modifier = Modifier.fillMaxWidth()) { Text(label("Add another app")) }
 }
 
 @Composable
