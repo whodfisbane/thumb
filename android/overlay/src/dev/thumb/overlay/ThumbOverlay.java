@@ -55,22 +55,23 @@ public final class ThumbOverlay {
     private static native void nativeSetSpeed(float speed);
     private static native float nativeGetFps();
     private static native void nativeSetAdBlock(boolean on);
+    private static native void nativeSetFpsLimit(int fps);
 
     private static final int MINT = 0xFF42FFC3;
     private static final int PANEL = 0xEE121614;
     private static final int MUTED = 0xFF9AA8A2;
     private static final float[] SPEEDS = {0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f};
     private static final String[] ROTATIONS = {"Auto", "Landscape", "Portrait"};
+    private static final int[] FPS_LIMITS = {0, 60, 30};
 
     static final String WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play.";
-    static final String WARN_FPS_UNLOCK = "Many older games tie their game speed to the frame rate. Unlocking FPS may make the game run too fast, " +
-        "break physics or animations, or drain more battery. If the game speeds up, use the speed slider to bring it back to 1×.";
+    static final String WARN_FPS_LIMIT = "Limiting FPS saves battery and fixes games that run too fast on high refresh rate screens. Games that tie their speed to the frame rate will run slower at a lower limit, and motion may look less smooth.";
 
     private static SharedPreferences prefs;
     private static Application app;
     private static boolean menuEnabled;
     private static boolean adblockDefault = true; // the "Block ads" build option
-    private static boolean modFps, modSpeed, modFpsUnlock, modAdblock, modScreenOn, modRotation, modFullscreen;
+    private static boolean modFps, modSpeed, modFpsLimit, modAdblock, modScreenOn, modRotation, modFullscreen;
     private static Bitmap icon;
     private static final WeakHashMap<Activity, View> buttons = new WeakHashMap<>();
     private static final WeakHashMap<Activity, TextView> badges = new WeakHashMap<>();
@@ -93,7 +94,7 @@ public final class ThumbOverlay {
         if (mods == null) mods = new JSONObject();
         modFps = mods.optBoolean("fps_counter");
         modSpeed = mods.optBoolean("speed");
-        modFpsUnlock = mods.optBoolean("fps_unlock");
+        modFpsLimit = mods.optBoolean("fps_limit");
         modAdblock = mods.optBoolean("adblock");
         modScreenOn = mods.optBoolean("keep_screen_on");
         modRotation = mods.optBoolean("rotation");
@@ -155,7 +156,7 @@ public final class ThumbOverlay {
         ViewGroup decor = (ViewGroup) w.getDecorView();
 
         // Persistent mod states, re-applied to every screen of the app.
-        if (modFpsUnlock) applyFpsUnlock(a, prefs.getBoolean("fps_unlock", false));
+        if (modFpsLimit) applyFpsLimit(a, prefs.getInt("fps_limit", 0));
         if (modScreenOn) applyScreenOn(a, prefs.getBoolean("screen_on", false));
         if (modRotation) applyRotation(a, prefs.getInt("rotation", 0));
         if (modFullscreen) applyFullscreen(a, prefs.getBoolean("fullscreen", false));
@@ -285,8 +286,7 @@ public final class ThumbOverlay {
 
         if (modSpeed) addSpeed(a, panel);
 
-        if (modFpsUnlock) panel.addView(toggle(a, "Unlock FPS (high refresh rate)", "fps_unlock", false, "Unlock FPS?", WARN_FPS_UNLOCK,
-            on -> applyFpsUnlock(a, on)));
+        if (modFpsLimit) addFpsLimit(a, panel);
         if (modAdblock) panel.addView(toggle(a, "Block ads", "adblock", adblockDefault, null, null, ThumbOverlay::nativeSetAdBlock));
         if (modScreenOn) panel.addView(toggle(a, "Keep screen on", "screen_on", false, null, null, on -> applyScreenOn(a, on)));
         if (modFullscreen) panel.addView(toggle(a, "Fullscreen (hide system bars)", "fullscreen", false, null, null,
@@ -378,6 +378,33 @@ public final class ThumbOverlay {
         panel.addView(bar);
     }
 
+    private static String fpsLabel(int fps) { return fps == 0 ? "Off" : fps + " FPS"; }
+
+    private static void addFpsLimit(final Activity a, LinearLayout panel) {
+        final TextView label = text(a, "FPS limit: " + fpsLabel(prefs.getInt("fps_limit", 0)), 15, Color.WHITE);
+        label.setPadding(0, dp(a, 10), 0, dp(a, 6));
+        label.setOnClickListener(v -> {
+            int current = prefs.getInt("fps_limit", 0);
+            int i = 0;
+            while (i < FPS_LIMITS.length && FPS_LIMITS[i] != current) i++;
+            final int next = FPS_LIMITS[(i + 1) % FPS_LIMITS.length];
+            Runnable apply = () -> {
+                prefs.edit().putInt("fps_limit", next).apply();
+                label.setText("FPS limit: " + fpsLabel(next));
+                applyFpsLimit(a, next);
+            };
+            if (next != 0 && !prefs.getBoolean("fps_limit_warned", false)) {
+                new AlertDialog.Builder(a).setTitle("Limit FPS?").setMessage(WARN_FPS_LIMIT)
+                    .setPositiveButton("Limit", (d, w) -> { prefs.edit().putBoolean("fps_limit_warned", true).apply(); apply.run(); })
+                    .setNegativeButton("Cancel", null).show();
+            } else {
+                apply.run();
+            }
+        });
+        panel.addView(label);
+        panel.addView(text(a, "Tap to switch: Off → 60 → 30", 12, MUTED));
+    }
+
     private static void addRotation(final Activity a, LinearLayout panel) {
         final TextView label = text(a, "Rotation: " + ROTATIONS[prefs.getInt("rotation", 0)], 15, Color.WHITE);
         label.setPadding(0, dp(a, 10), 0, dp(a, 6));
@@ -422,20 +449,26 @@ public final class ThumbOverlay {
 
     // ------------------------------------------------------------------ mods
 
-    /** Ask for the display's highest refresh rate at the current resolution, or the default. */
-    private static void applyFpsUnlock(Activity a, boolean on) {
+    /**
+     * FPS limit: ask the display for a refresh rate at or just above the limit
+     * (saves the most battery), and pace frames in the runtime so the limit
+     * holds exactly. 0 = no limit (the display's default).
+     */
+    private static void applyFpsLimit(Activity a, int fps) {
+        nativeSetFpsLimit(fps);
         Window w = a.getWindow();
         if (w == null) return;
         WindowManager.LayoutParams lp = w.getAttributes();
         int modeId = 0;
-        if (on) {
+        if (fps > 0) {
             Display d = a.getWindowManager().getDefaultDisplay();
             Display.Mode current = d.getMode();
-            float best = 0;
+            float best = Float.MAX_VALUE;
             for (Display.Mode m : d.getSupportedModes()) {
+                float r = m.getRefreshRate();
                 if (m.getPhysicalWidth() == current.getPhysicalWidth() && m.getPhysicalHeight() == current.getPhysicalHeight()
-                        && m.getRefreshRate() > best) {
-                    best = m.getRefreshRate();
+                        && r >= fps - 1 && r < best) {
+                    best = r;
                     modeId = m.getModeId();
                 }
             }

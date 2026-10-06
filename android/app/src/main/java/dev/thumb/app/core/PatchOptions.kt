@@ -23,7 +23,7 @@ data class PatchOptions(
     val overlay: Boolean = true,
     val fpsCounter: Boolean = true,
     val speed: Boolean = false,
-    val fpsUnlock: Boolean = false,
+    val fpsLimit: Boolean = false,
     val adblockToggle: Boolean = false,
     val keepScreenOn: Boolean = true,
     val rotation: Boolean = true,
@@ -40,7 +40,7 @@ data class PatchOptions(
         put("mods", org.json.JSONObject().apply {
             put("fps_counter", overlay && fpsCounter)
             put("speed", overlay && speed)
-            put("fps_unlock", overlay && fpsUnlock)
+            put("fps_limit", overlay && fpsLimit)
             put("adblock", overlay && adblockToggle)
             put("keep_screen_on", overlay && keepScreenOn)
             put("rotation", overlay && rotation)
@@ -71,8 +71,7 @@ data class PatchOptions(
         const val INFO_LEGACY_FS = "Recommended. Old apps expect things modern Android changed: browsing from \"/\", " +
             "asset files positioned for them, and so on. THUMB quietly provides the old behaviour."
         const val WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play."
-        const val WARN_FPS_UNLOCK = "Many older games tie their game speed to the frame rate. Unlocking FPS may make the game run too fast, " +
-            "break physics or animations, or drain more battery. If the game speeds up, use the speed slider to bring it back to 1×."
+        const val WARN_FPS_LIMIT = "Limiting FPS saves battery and fixes games that run too fast on high refresh rate screens. Games that tie their speed to the frame rate will run slower at a lower limit, and motion may look less smooth."
         const val WARN_ADBLOCK = "Blocks calls to known ad SDKs. Some apps may refuse features or crash if their ads can't load."
         const val WARN_SANDBOX = "Removes access to contacts, accounts, location, phone, SMS, camera, microphone, calendar and sensors. " +
             "Old apps often assume they have these and may crash or lose features (e.g. friend lists, maps, photos)."

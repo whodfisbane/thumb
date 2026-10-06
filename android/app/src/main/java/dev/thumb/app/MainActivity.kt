@@ -391,9 +391,9 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, {
         if (it) ask("Include the speed slider?", P.WARN_SPEED) { onChange(options.copy(speed = true)) } else onChange(options.copy(speed = false))
     }, P.WARN_SPEED, enabled = options.overlay, indent = true)
-    OptionRow("FPS unlock", "Use the screen's highest refresh rate", options.fpsUnlock, {
-        if (it) ask("Include FPS unlock?", P.WARN_FPS_UNLOCK) { onChange(options.copy(fpsUnlock = true)) } else onChange(options.copy(fpsUnlock = false))
-    }, P.WARN_FPS_UNLOCK, enabled = options.overlay, indent = true)
+    OptionRow("FPS limit", "Cap at 60 or 30 FPS: saves battery, fixes too-fast games", options.fpsLimit, {
+        if (it) ask("Include FPS limit?", P.WARN_FPS_LIMIT) { onChange(options.copy(fpsLimit = true)) } else onChange(options.copy(fpsLimit = false))
+    }, P.WARN_FPS_LIMIT, enabled = options.overlay, indent = true)
     OptionRow("Keep screen on", "For reading, loading screens, idle games", options.keepScreenOn, { onChange(options.copy(keepScreenOn = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Rotation lock", "Auto, landscape or portrait", options.rotation, { onChange(options.copy(rotation = it)) },

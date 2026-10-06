@@ -18,7 +18,9 @@ int64_t real_sleep_ns(int64_t guest_ns);
 
 // Frame counting for the FPS display: thunks call frame() once per frame
 // (e.g. on glClear with the color buffer); fps() returns the recent rate.
+// With a limit set, frame() also waits so frames are at least 1/limit apart.
 void frame();
 double fps();
+void set_fps_limit(int fps);  // 0 = unlimited
 
 }  // namespace h32::timescale

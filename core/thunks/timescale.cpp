@@ -2,7 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <algorithm>
 #include <mutex>
+#include <string>
 
 #include "common.h"
 
@@ -69,7 +71,28 @@ int64_t real_sleep_ns(int64_t guest_ns) {
     return s == 1.0 ? guest_ns : int64_t(double(guest_ns) / s);
 }
 
-void frame() { g_frames.fetch_add(1, std::memory_order_relaxed); }
+std::atomic<int64_t> g_frame_interval_ns{0};
+
+void set_fps_limit(int fps) {
+    g_frame_interval_ns = fps > 0 ? 1000000000LL / fps : 0;
+    H32_INFO("fps limit: %s", fps > 0 ? std::to_string(fps).c_str() : "off");
+}
+
+void frame() {
+    g_frames.fetch_add(1, std::memory_order_relaxed);
+    int64_t interval = g_frame_interval_ns.load(std::memory_order_relaxed);
+    if (interval <= 0) return;
+    // Pace frames: sleep until the next slot (render thread only calls this).
+    thread_local int64_t next = 0;
+    int64_t now = now_ns(CLOCK_MONOTONIC);
+    if (now < next) {
+        timespec ts{time_t((next - now) / 1000000000), long((next - now) % 1000000000)};
+        nanosleep(&ts, nullptr);
+        now = next;
+    }
+    next = std::max(now, next) + interval;
+    if (next < now) next = now + interval;
+}
 
 double fps() {
     using clock = std::chrono::steady_clock;

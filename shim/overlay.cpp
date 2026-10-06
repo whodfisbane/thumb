@@ -15,6 +15,7 @@ namespace {
 
 void JNICALL set_speed(JNIEnv*, jclass, jfloat speed) { h32::timescale::set_scale(speed); }
 jfloat JNICALL get_fps(JNIEnv*, jclass) { return jfloat(h32::timescale::fps()); }
+void JNICALL set_fps_limit(JNIEnv*, jclass, jint fps) { h32::timescale::set_fps_limit(fps); }
 void JNICALL set_ad_block(JNIEnv*, jclass, jboolean on) { h32::jni::set_ad_block(on); }
 
 // Reads assets/<path> of the running app into a string ("" if absent).
@@ -81,8 +82,9 @@ void thumb_start_overlay(JNIEnv* env) {
         {"nativeSetSpeed", "(F)V", reinterpret_cast<void*>(set_speed)},
         {"nativeGetFps", "()F", reinterpret_cast<void*>(get_fps)},
         {"nativeSetAdBlock", "(Z)V", reinterpret_cast<void*>(set_ad_block)},
+        {"nativeSetFpsLimit", "(I)V", reinterpret_cast<void*>(set_fps_limit)},
     };
-    if (env->RegisterNatives(overlay, natives, 3) != JNI_OK) {
+    if (env->RegisterNatives(overlay, natives, 4) != JNI_OK) {
         env->ExceptionClear();
         H32_ERROR("overlay: RegisterNatives failed");
         env->PopLocalFrame(nullptr);
