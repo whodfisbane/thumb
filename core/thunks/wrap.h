@@ -59,6 +59,12 @@ uint32_t guest_env();
 
 // Guest FILE* -> host FILE* (implemented in thunks/libc_stdio.cpp).
 FILE* host_file(gaddr f);
+// Mirrors a stream's EOF/error state and fd into the guest FILE struct, which
+// old NDK headers read directly via feof()/ferror()/fileno() macros.
+void sync_guest_file(gaddr f);
+FILE* host_file_for_call(gaddr f);
+// The guest FILE* passed to the thunk currently running (0 if none).
+inline thread_local gaddr t_file_arg = 0;
 
 // jni.h declares _jmethodID/_jfieldID as incomplete types, so references are
 // matched against an explicit list rather than with is_base_of.
@@ -95,7 +101,8 @@ T get_arg(ArgCursor& c) {
         c.word();
         return jni::host_env();
     } else if constexpr (std::is_same_v<T, FILE*>) {
-        return host_file(c.word());
+        t_file_arg = c.word();
+        return host_file_for_call(t_file_arg);
     } else if constexpr (is_jni_ref_v<T>) {
         return static_cast<T>(jni::ref_to_host(c.word()));
     } else if constexpr (is_jni_id_v<T>) {
@@ -160,6 +167,7 @@ struct Wrapper<Abi, R(A...)> {
     template <R (*Fn)(A...)>
     static void thunk(GuestThread& t) {
         ArgCursor c{t};
+        t_file_arg = 0;
         // Braced init guarantees left-to-right argument evaluation.
         std::tuple<A...> args{get_arg<Abi, A>(c)...};
         if constexpr (Abi::sync_errno) errno = 0;
@@ -170,6 +178,7 @@ struct Wrapper<Abi, R(A...)> {
             put_ret<Abi, R>(t, r);
         }
         if constexpr (Abi::sync_errno) sync_guest_errno(t);
+        if (t_file_arg) sync_guest_file(t_file_arg);
     }
 };
 

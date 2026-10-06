@@ -37,7 +37,7 @@ cmake -S "$ROOT" -B "$OUT" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-$API \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DTHUMB_DEV_OBB_FETCH=$DEV \
+    -DTHUMB_DEV=$DEV \
     -DCMAKE_CXX_FLAGS="-include cstdlib" \
     -DCMAKE_FIND_ROOT_PATH="$DEPS" -DBOOST_ROOT="$DEPS" -DBoost_INCLUDE_DIR="$DEPS/include" >/dev/null
 ninja -C "$OUT" thumb thumb_stub

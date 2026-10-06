@@ -21,6 +21,11 @@ constexpr int kEaiFail = 4;
 void add_path_mapping(const std::string& guest_prefix, const std::string& host_prefix);
 std::string map_path(const char* guest_path);
 
+// ---- shared with the raw syscall layer (thunks/syscalls.cpp); return -errno on failure ----
+int32_t guest_mmap(gaddr hint, uint32_t len, uint32_t prot, int32_t flags, int fd, uint64_t offset);
+int32_t guest_munmap(gaddr a);
+int32_t guest_open(int dirfd, const char* guest_path, int flags, int mode);
+
 // ---- FILE* handles ----
 // Guest FILE* values are guest addresses of small placeholder structs; this
 // maps them to host FILE*. stdin/stdout/stderr live in the guest __sF array.
@@ -62,6 +67,6 @@ int guest_fscanf(FILE* f, const char* fmt, VarArgs& va);
 // pointers to static storage (strerror, localtime, ...). `slot` picks a
 // separate buffer per function so their results don't clobber each other.
 gaddr thread_scratch(int slot, size_t size);
-enum ScratchSlot { kScratchStrerror, kScratchTm, kScratchLocale, kScratchInetNtoa, kScratchGai, kScratchCount };
+enum ScratchSlot { kScratchStrerror, kScratchTm, kScratchLocale, kScratchInetNtoa, kScratchGai, kScratchDlerror, kScratchEnv, kScratchCount };
 
 }  // namespace h32

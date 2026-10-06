@@ -24,6 +24,11 @@ struct Module {
     uint32_t init_count = 0, fini_count = 0;
     gaddr dt_init = 0, dt_fini = 0;
 
+    std::string dir;                 // directory it was loaded from (for siblings)
+    std::vector<Module*> deps;       // sibling libraries it needs (DT_NEEDED)
+    bool constructors_ran = false;
+    bool jni_loaded = false;         // JNI_OnLoad / Java_ exports handled
+
     // Exported (defined) dynamic symbols: name -> guest address.
     std::unordered_map<std::string, gaddr> exports;
     // Sorted function symbols, for crash reports.
@@ -40,7 +45,12 @@ Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name);
 // ("libfoo.so" for libfoo_arm32.so) so the guest sees itself as it expects.
 Module* load_module_file(const std::string& path, const std::string& name = "");
 
-// Runs DT_INIT and DT_INIT_ARRAY on the calling thread.
+// Loads a sibling library by its original name ("libfoo.so") from `dir`,
+// trying "libfoo_arm32.so" (THUMB-patched APKs) then "libfoo.so". Returns the
+// already-loaded module if present, nullptr if no such file.
+Module* load_sibling(const std::string& dir, const std::string& name);
+
+// Runs DT_INIT and DT_INIT_ARRAY on the calling thread (dependencies first, once).
 void run_constructors(Module& m);
 
 Module* find_module(std::string_view name);

@@ -65,6 +65,18 @@ void t_tm_conv(GuestThread& t) {
     set_ret32(t, buf);
 }
 
+// struct tm* localtime_r(const time_t*, struct tm*)
+template <std::tm* (*Fn)(const time_t*, std::tm*)>
+void t_tm_conv_r(GuestThread& t) {
+    gaddr src = t.regs()[0], out = t.regs()[1];
+    if (!src || !out) return set_ret32(t, 0);
+    time_t tt = mem().read<int32_t>(src);
+    std::tm tm{};
+    if (!Fn(&tt, &tm)) return set_ret32(t, 0);
+    tm_to_guest(out, tm);
+    set_ret32(t, out);
+}
+
 void t_mktime(GuestThread& t) {
     gaddr g = t.regs()[0];
     std::tm tm = tm_from_guest(g);
@@ -95,6 +107,8 @@ void register_libc_time() {
     add("localtime", t_tm_conv<::localtime_r>);
     add("gmtime", t_tm_conv<::gmtime_r>);
     add("mktime", t_mktime);
+    add("localtime_r", t_tm_conv_r<::localtime_r>);
+    add("gmtime_r", t_tm_conv_r<::gmtime_r>);
     add("strftime", t_strftime);
     add("wcsftime", t_wcsftime);
 }

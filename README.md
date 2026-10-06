@@ -16,6 +16,15 @@ Built gaming-first: the first app it ran was **Worms 3** (`com.worms3.app` 2.1).
 
 **Worms 3 is playable on a Pixel 9a (GrapheneOS, Android 17)**: graphics, audio, touch, 60 fps. 🎉
 
+### Compatibility
+
+| App | Version | Status | Notes |
+|---|---|---|---|
+| Worms 3 | 2.1 | ✅ Playable | GLES1, Java audio, self-unpacking `libgvradio` |
+| ScummVM (SDL build) | 1.8.1 | 🟡 Launcher runs | 7 libraries, SDL 1.2, old-NDK stdio macros; games not tested yet |
+| ScummVM (native build) | 1.8.1 | ⏳ Not tested | Doctor: 100% |
+| VLC | 2.0.6 | ❌ Not yet | Doctor: 66% (needs GLES2/EGL, more libc, sockets) |
+
 | Milestone | State |
 |---|---|
 | ELF loader + JIT runs a game's constructors and `JNI_OnLoad` | ✅ |

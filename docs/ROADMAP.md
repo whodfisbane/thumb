@@ -82,6 +82,15 @@ JIT is ~1.6 MB of the ~4 MB runtime), so patched apps work fully offline. Addons
 - [ ] THUMB Doctor names the addon an app needs and offers to download it
 - [ ] Code stays organized per API family so packs can be split out later if needed
 
+## Ideas queue
+
+- [ ] **Sandbox mode** (per app, default on for games): strip unneeded permissions from the
+      manifest at patch time; in the translator, block or limit native networking, virtualize
+      file access (save backup/export, multiple save profiles), fake device identifiers
+- [ ] **LAN multiplayer**: real socket support (32-bit sockaddr/addrinfo/timeval/select
+      conversions), with a per-app network setting (none / LAN only / full)
+- [ ] Raise `targetSdkVersion` during patching (Android 14+ refuses installs below 23)
+
 ## Phase 4: Performance and polish
 
 - [ ] Measure THUMB's own overhead (stats readout), tune JIT cache sizes per thread

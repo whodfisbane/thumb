@@ -1,6 +1,7 @@
 #include "loader/elf_loader.h"
 
 #include <elf.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cstring>
@@ -26,8 +27,10 @@ namespace h32 {
 
 namespace {
 
-std::mutex g_modules_mutex;
+std::recursive_mutex g_modules_mutex;
 std::vector<std::unique_ptr<Module>> g_modules;
+// Directory of the library being loaded (siblings come from the same place).
+thread_local std::string g_loading_dir;
 
 struct DynInfo {
     gaddr symtab = 0, strtab = 0, hash = 0, gnu_hash = 0;
@@ -153,7 +156,19 @@ Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name) 
     }
     std::sort(mod->sorted_symbols.begin(), mod->sorted_symbols.end());
 
-    for (uint32_t off : d.needed) H32_DEBUG("%s needs %s", name.c_str(), m.str(d.strtab + off));
+    // Sibling libraries the app ships itself must be loaded first so their
+    // exports can satisfy our imports. System libraries are served by thunks.
+    for (uint32_t off : d.needed) {
+        std::string dep = m.str(d.strtab + off);
+        if (g_loading_dir.empty() || find_module(dep)) {
+            if (Module* already = find_module(dep)) mod->deps.push_back(already);
+            continue;
+        }
+        if (Module* sib = load_sibling(g_loading_dir, dep)) {
+            H32_DEBUG("%s needs %s: loaded from the app", name.c_str(), dep.c_str());
+            mod->deps.push_back(sib);
+        }
+    }
 
     // Symbol resolution: own definition, then other modules, then thunks.
     std::unordered_map<uint32_t, gaddr> cache;
@@ -168,7 +183,7 @@ Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name) 
         } else {
             bool found = false;
             {
-                std::lock_guard lk(g_modules_mutex);
+                std::lock_guard<std::recursive_mutex> lk(g_modules_mutex);
                 for (auto& other : g_modules)
                     if (auto a = other->find(sn)) {
                         v = *a;
@@ -216,12 +231,20 @@ Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name) 
     H32_INFO("loaded %s at 0x%08x (%u KB, %zu exports, %zu unresolved imports)", name.c_str(), start, (hi - lo) / 1024,
              mod->exports.size(), unresolved);
 
-    std::lock_guard lk(g_modules_mutex);
+    std::lock_guard<std::recursive_mutex> lk(g_modules_mutex);
     g_modules.push_back(std::move(mod));
     return g_modules.back().get();
 }
 
 Module* load_module_file(const std::string& path, const std::string& name_override) {
+    std::string dir = path.substr(0, path.find_last_of('/') == std::string::npos ? 0 : path.find_last_of('/'));
+    std::string saved = g_loading_dir;
+    g_loading_dir = dir.empty() ? "." : dir;
+    struct Restore {
+        std::string& ref;
+        std::string val;
+        ~Restore() { ref = val; }
+    } restore{g_loading_dir, saved};
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         H32_ERROR("cannot open %s", path.c_str());
@@ -229,10 +252,32 @@ Module* load_module_file(const std::string& path, const std::string& name_overri
     }
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     std::string name = name_override.empty() ? path.substr(path.find_last_of('/') + 1) : name_override;
-    return load_module(bytes, name);
+    Module* mod = load_module(bytes, name);
+    if (mod) mod->dir = g_loading_dir;
+    return mod;
+}
+
+Module* load_sibling(const std::string& dir, const std::string& name) {
+    if (Module* m = find_module(name)) return m;
+    // Libraries that need each other: break the cycle (imports then resolve to thunks).
+    thread_local std::vector<std::string> loading;
+    if (std::find(loading.begin(), loading.end(), name) != loading.end()) return nullptr;
+    loading.push_back(name);
+    struct Pop {
+        std::vector<std::string>& v;
+        ~Pop() { v.pop_back(); }
+    } pop{loading};
+    std::string base = name.size() > 3 && name.compare(name.size() - 3, 3, ".so") == 0 ? name.substr(0, name.size() - 3) : name;
+    for (const std::string& file : {dir + "/" + base + "_arm32.so", dir + "/" + name}) {
+        if (::access(file.c_str(), R_OK) == 0) return load_module_file(file, name);
+    }
+    return nullptr;
 }
 
 void run_constructors(Module& mod) {
+    if (mod.constructors_ran) return;
+    mod.constructors_ran = true;
+    for (Module* dep : mod.deps) run_constructors(*dep);
     auto& t = GuestThread::current();
     if (mod.dt_init) t.call(mod.dt_init);
     for (uint32_t i = 0; i < mod.init_count; i++) {
@@ -245,21 +290,21 @@ void run_constructors(Module& mod) {
 }
 
 Module* find_module(std::string_view name) {
-    std::lock_guard lk(g_modules_mutex);
+    std::lock_guard<std::recursive_mutex> lk(g_modules_mutex);
     for (auto& mod : g_modules)
         if (mod->name == name) return mod.get();
     return nullptr;
 }
 
 std::vector<Module*> all_modules() {
-    std::lock_guard lk(g_modules_mutex);
+    std::lock_guard<std::recursive_mutex> lk(g_modules_mutex);
     std::vector<Module*> out;
     for (auto& mod : g_modules) out.push_back(mod.get());
     return out;
 }
 
 Module* module_containing(gaddr a) {
-    std::lock_guard lk(g_modules_mutex);
+    std::lock_guard<std::recursive_mutex> lk(g_modules_mutex);
     for (auto& mod : g_modules)
         if (mod->contains(a)) return mod.get();
     return nullptr;

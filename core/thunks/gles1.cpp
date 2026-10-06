@@ -27,6 +27,11 @@
     X(glClearColor, void(GLclampf, GLclampf, GLclampf, GLclampf))                            \
     X(glClearDepthf, void(GLclampf))                                                         \
     X(glClearStencil, void(GLint))                                                           \
+    X(glClearColorx, void(GLclampx, GLclampx, GLclampx, GLclampx))                           \
+    X(glScalex, void(GLfixed, GLfixed, GLfixed))                                             \
+    X(glTranslatex, void(GLfixed, GLfixed, GLfixed))                                         \
+    X(glGetTexEnviv, void(GLenum, GLenum, GLint*))                                           \
+    X(glIsEnabled, GLboolean(GLenum))                                                        \
     X(glClientActiveTexture, void(GLenum))                                                   \
     X(glColor4f, void(GLfloat, GLfloat, GLfloat, GLfloat))                                   \
     X(glColor4ub, void(GLubyte, GLubyte, GLubyte, GLubyte))                                  \

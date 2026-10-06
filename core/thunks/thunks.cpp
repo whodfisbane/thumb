@@ -108,6 +108,8 @@ void dispatch(GuestThread& t, uint32_t svc) {
     }
     Entry* e = r.entries[svc];
     uint64_t n = e->calls.fetch_add(1, std::memory_order_relaxed);
+    t.last_svc.store(svc, std::memory_order_relaxed);
+    t.thunk_calls.fetch_add(1, std::memory_order_relaxed);
     if (!e->fn) {
         if (n == 0)
             H32_WARN("UNIMPLEMENTED %s (r0=%08x r1=%08x r2=%08x) called from %s — returning 0", e->name.c_str(),
@@ -173,6 +175,7 @@ void register_all() {
         register_zlib();
         register_android();
         register_gles1();
+        register_dl();
     });
 }
 

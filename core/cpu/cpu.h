@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -92,6 +93,11 @@ public:
     uint32_t cpsr();
     // Reads argument word `i` of the call that entered the current thunk.
     uint32_t arg_word(size_t i);
+    // pthread_exit: stops this thread's guest code; the outermost call()
+    // returns `value`. Only valid when no host frames sit between.
+    void request_exit(uint32_t value);
+    bool exit_requested() const { return exit_requested_; }
+
     // Redirects guest execution when the current thunk returns (longjmp).
     void request_jump(const std::array<uint32_t, 16>& regs, uint32_t cpsr);
 
@@ -100,6 +106,14 @@ public:
     gaddr tls_area() const { return tls_area_; }
     gaddr stack_top() const { return stack_top_; }
     int depth() const { return active_; }
+
+    // Debug sampling: last thunk this thread called and how many it has called.
+    std::atomic<uint32_t> last_svc{~0u};
+    std::atomic<uint64_t> thunk_calls{0};
+    // One line per guest thread: depth, current PC (symbolized), last thunk.
+    static std::vector<std::string> sample_all();
+    // Dev builds: log sample_all() every `seconds` from a background thread.
+    static void start_sampler(int seconds);
 
     // pthread_getspecific/setspecific storage (see thunks/libc_pthread.cpp).
     static constexpr int kMaxKeys = 256;
@@ -118,6 +132,8 @@ private:
     gaddr stack_base_ = 0, stack_top_ = 0;
     gaddr errno_addr_ = 0;
     gaddr tls_area_ = 0;
+    bool exit_requested_ = false;
+    uint32_t exit_value_ = 0;
 };
 
 // Disassembly-free crash context: "module+offset (symbol)".

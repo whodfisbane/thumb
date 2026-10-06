@@ -65,6 +65,33 @@ void register_libc_math() {
     add("fabsf", H32_WRAP(::fabsf, F1));
     add("modff", H32_WRAP(h_modff, float(float, float*)));
 
+    add("asinf", H32_WRAP(::asinf, F1));
+    add("acosf", H32_WRAP(::acosf, F1));
+    add("atanf", H32_WRAP(::atanf, F1));
+    add("expf", H32_WRAP(::expf, F1));
+    add("logf", H32_WRAP(::logf, F1));
+    add("log10f", H32_WRAP(::log10f, F1));
+    add("cosh", H32_WRAP(::cosh, D1));
+    add("sinh", H32_WRAP(::sinh, D1));
+    add("tanh", H32_WRAP(::tanh, D1));
+    add("hypot", H32_WRAP(::hypot, D2));
+    add("hypotf", H32_WRAP(::hypotf, F2));
+    add("rint", H32_WRAP(::rint, D1));
+    add("round", H32_WRAP(::round, D1));
+    add("trunc", H32_WRAP(::trunc, D1));
+    add("truncf", H32_WRAP(::truncf, F1));
+    add("fmaxf", H32_WRAP(::fmaxf, F2));
+    add("fminf", H32_WRAP(::fminf, F2));
+    add("fmax", H32_WRAP(::fmax, D2));
+    add("fmin", H32_WRAP(::fmin, D2));
+    add("modf", H32_WRAP(+[](double x, double* ip) { return std::modf(x, ip); }, double(double, double*)));
+    // long is 32-bit on the guest
+    add("lrint", H32_WRAP(+[](double x) { return int(std::lrint(x)); }, int(double)));
+    add("lrintf", H32_WRAP(+[](float x) { return int(std::lrint(x)); }, int(float)));
+    add("lround", H32_WRAP(+[](double x) { return int(std::lround(x)); }, int(double)));
+    add("lroundf", H32_WRAP(+[](float x) { return int(std::lround(x)); }, int(float)));
+    add("lrand48", H32_WRAP(+[]() { return int(::lrand48()); }, int()));
+    add("srand48", H32_WRAP(+[](int seed) { ::srand48(seed); }, void(int)));
     H32_ADD(rand, int());
     H32_ADD(srand, void(unsigned));
     add("random", H32_WRAP(+[]() -> int { return int(::random()); }, int()));

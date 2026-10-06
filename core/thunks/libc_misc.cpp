@@ -1,6 +1,9 @@
 // Networking and other system calls. Online services for old games are
 // usually dead, so networking reports "unreachable" instead of being bridged.
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
+#include <time.h>
 #include <sys/uio.h>
 #include <poll.h>
 #include <unistd.h>
@@ -11,6 +14,9 @@
 #include <vector>
 
 #include "loader/elf_loader.h"
+#ifdef __ANDROID__
+#include <sys/system_properties.h>
+#endif
 
 #include "thunks/libc_internal.h"
 #include "thunks/thunks.h"
@@ -159,11 +165,185 @@ void t_assert2(GuestThread& t) {
           mem().str(t.regs()[3]));
 }
 
+// libc-style result: -errno -> errno + -1
+void ret_or_errno(GuestThread& t, int32_t r) {
+    if (r < 0 && r > -4096) {
+        mem().write<int32_t>(t.errno_addr(), -r);
+        return set_ret32(t, uint32_t(-1));
+    }
+    set_ret32(t, uint32_t(r));
+}
+
+// void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t offset) — 32-bit off_t
+void t_mmap(GuestThread& t) {
+    ArgCursor c{t};
+    gaddr addr = c.word();
+    uint32_t len = c.word(), prot = c.word();
+    int32_t flags = int32_t(c.word()), fd = int32_t(c.word());
+    uint32_t off = c.word();
+    ret_or_errno(t, guest_mmap(addr, len, prot, flags, fd, off));
+}
+void t_munmap(GuestThread& t) { ret_or_errno(t, guest_munmap(t.regs()[0])); }
+
+// int open(const char* path, int flags, ...) / openat(int dirfd, ...)
+void t_open(GuestThread& t) { ret_or_errno(t, guest_open(AT_FDCWD, mem().str(t.regs()[0]), int32_t(t.regs()[1]), int32_t(t.regs()[2]))); }
+void t_openat(GuestThread& t) {
+    int dirfd = int32_t(t.regs()[0]) == -100 ? AT_FDCWD : int32_t(t.regs()[0]);
+    ret_or_errno(t, guest_open(dirfd, mem().str(t.regs()[1]), int32_t(t.regs()[2]), int32_t(t.regs()[3])));
+}
+
+void t_access(GuestThread& t) {
+    std::string p = map_path(mem().str(t.regs()[0]));
+    errno = 0;
+    set_ret32(t, uint32_t(::access(p.c_str(), int32_t(t.regs()[1]))));
+    sync_guest_errno(t);
+}
+void t_chdir(GuestThread& t) {
+    std::string p = map_path(mem().str(t.regs()[0]));
+    errno = 0;
+    set_ret32(t, uint32_t(::chdir(p.c_str())));
+    sync_guest_errno(t);
+}
+// char* getcwd(char* buf, size_t size); buf == NULL allocates
+void t_getcwd(GuestThread& t) {
+    char host[4096];
+    if (!::getcwd(host, sizeof host)) {
+        sync_guest_errno(t);
+        return set_ret32(t, 0);
+    }
+    size_t n = std::strlen(host) + 1;
+    gaddr buf = t.regs()[0];
+    size_t size = t.regs()[1];
+    if (!buf) {
+        buf = mem().malloc(size > n ? size : n);
+    } else if (size < n) {
+        mem().write<int32_t>(t.errno_addr(), ERANGE);
+        return set_ret32(t, 0);
+    }
+    std::memcpy(mem().ptr<char>(buf), host, n);
+    set_ret32(t, buf);
+}
+
+// Processes: an app can't fork a translated copy of itself.
+void t_nosys(GuestThread& t) {
+    mem().write<int32_t>(t.errno_addr(), ENOSYS);
+    set_ret32(t, uint32_t(-1));
+}
+
+// Signals belong to the host runtime (ART, dynarmic); guest handlers are not installed.
+void t_signal(GuestThread& t) { set_ret32(t, 0); }  // returns SIG_DFL
+void t_sigaction(GuestThread& t) {                  // (sig, const sigaction* act, sigaction* old)
+    if (t.regs()[1]) H32_DEBUG("sigaction(%d): guest signal handler not installed", int32_t(t.regs()[0]));
+    if (gaddr old = t.regs()[2]) std::memset(mem().ptr<void>(old), 0, 16);  // bionic32 struct sigaction
+    set_ret32(t, 0);
+}
+
+// int nanosleep(const struct timespec* req, struct timespec* rem) — 32-bit timespec
+void t_nanosleep(GuestThread& t) {
+    gaddr req = t.regs()[0];
+    timespec ts{mem().read<int32_t>(req), mem().read<int32_t>(req + 4)};
+    timespec rem{};
+    int r = ::nanosleep(&ts, &rem);
+    if (gaddr out = t.regs()[1]) {
+        mem().write<int32_t>(out, int32_t(rem.tv_sec));
+        mem().write<int32_t>(out + 4, int32_t(rem.tv_nsec));
+    }
+    if (r != 0) sync_guest_errno(t);
+    set_ret32(t, uint32_t(r));
+}
+
+void t_clock_gettime(GuestThread& t) {
+    timespec ts;
+    int r = ::clock_gettime(clockid_t(t.regs()[0]), &ts);
+    if (r == 0) {
+        mem().write<int32_t>(t.regs()[1], int32_t(ts.tv_sec));
+        mem().write<int32_t>(t.regs()[1] + 4, int32_t(ts.tv_nsec));
+    } else {
+        sync_guest_errno(t);
+    }
+    set_ret32(t, uint32_t(r));
+}
+
+// ---- environment: a guest-side view layered over the host environment ----
+std::mutex g_env_lock;
+std::unordered_map<std::string, gaddr> g_env;  // name -> guest string (or 0 = unset)
+
+void t_getenv(GuestThread& t) {
+    const char* name = mem().str(t.regs()[0]);
+    if (!name) return set_ret32(t, 0);
+    std::lock_guard lk(g_env_lock);
+    auto it = g_env.find(name);
+    if (it != g_env.end()) return set_ret32(t, it->second);
+    const char* host = ::getenv(name);
+    gaddr g = host ? mem().strdup(host) : 0;
+    g_env[name] = g;  // cache so the pointer stays valid
+    set_ret32(t, g);
+}
+void t_setenv(GuestThread& t) {
+    const char* name = mem().str(t.regs()[0]);
+    const char* value = mem().str(t.regs()[1]);
+    if (!name || !value) return set_ret32(t, uint32_t(-1));
+    std::lock_guard lk(g_env_lock);
+    auto& slot = g_env[name];
+    if (slot && !t.regs()[2]) return set_ret32(t, 0);  // overwrite == 0
+    slot = mem().strdup(value);                         // old string leaks, as in libc
+    set_ret32(t, 0);
+}
+void t_unsetenv(GuestThread& t) {
+    std::lock_guard lk(g_env_lock);
+    if (const char* name = mem().str(t.regs()[0])) g_env[name] = 0;
+    set_ret32(t, 0);
+}
+
+// int __system_property_get(const char* name, char* value) — value buffer is 92 bytes
+void t_property_get(GuestThread& t) {
+    const char* name = mem().str(t.regs()[0]);
+    char* out = mem().ptr<char>(t.regs()[1]);
+    if (!out) return set_ret32(t, 0);
+    out[0] = 0;
+#ifdef __ANDROID__
+    char value[92] = {};
+    int n = __system_property_get(name, value);
+    std::memcpy(out, value, sizeof value);
+    set_ret32(t, uint32_t(n));
+#else
+    (void)name;
+    set_ret32(t, 0);
+#endif
+}
+
 }  // namespace
 
 namespace thunks {
 
 void register_libc_misc() {
+    add("mmap", t_mmap);
+    add("munmap", t_munmap);
+    add("open", t_open);
+    add("openat", t_openat);
+    add("access", t_access);
+    add("chdir", t_chdir);
+    add("getcwd", t_getcwd);
+    H32_ADD(dup, int(int));
+    H32_ADD(dup2, int(int, int));
+    H32_ADD(pipe, int(int*));
+    H32_ADD(getpid, pid_t());
+    H32_ADD(getuid, uid_t());
+    H32_ADD(setpriority, int(int, id_t, int));
+    H32_ADD(isatty, int(int));
+    add("fork", t_nosys);
+    add("execlp", t_nosys);
+    add("execvp", t_nosys);
+    add("waitpid", t_nosys);
+    add("signal", t_signal);
+    add("bsd_signal", t_signal);
+    add("sigaction", t_sigaction);
+    add("nanosleep", t_nanosleep);
+    add("clock_gettime", t_clock_gettime);
+    add("getenv", t_getenv);
+    add("setenv", t_setenv);
+    add("unsetenv", t_unsetenv);
+    add("__system_property_get", t_property_get);
     add("sysconf", t_sysconf);
     add("mprotect", t_mprotect);
     add("dladdr", t_dladdr);

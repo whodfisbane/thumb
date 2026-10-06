@@ -94,6 +94,41 @@ void t_stream_end(GuestThread& t) {
     set_ret32(t, uint32_t(r));
 }
 
+template <int (*Fn)(z_streamp)>
+void t_stream_reset(GuestThread& t) {
+    gaddr g = t.regs()[0];
+    z_stream* s = shadow(g, false);
+    if (!s) return set_ret32(t, uint32_t(Z_STREAM_ERROR));
+    sync_in(g, s);
+    int r = Fn(s);
+    sync_out(g, s);
+    set_ret32(t, uint32_t(r));
+}
+
+// int inflateSetDictionary(z_streamp, const Bytef* dict, uInt len)
+void t_inflate_set_dictionary(GuestThread& t) {
+    gaddr g = t.regs()[0];
+    z_stream* s = shadow(g, false);
+    if (!s) return set_ret32(t, uint32_t(Z_STREAM_ERROR));
+    sync_in(g, s);
+    int r = inflateSetDictionary(s, mem().ptr<const Bytef>(t.regs()[1]), t.regs()[2]);
+    sync_out(g, s);
+    set_ret32(t, uint32_t(r));
+}
+
+// int inflateCopy(z_streamp dest, z_streamp source)
+void t_inflate_copy(GuestThread& t) {
+    gaddr gd = t.regs()[0], gs = t.regs()[1];
+    z_stream* src = shadow(gs, false);
+    if (!src) return set_ret32(t, uint32_t(Z_STREAM_ERROR));
+    sync_in(gs, src);
+    z_stream* dst = shadow(gd, true);
+    int r = inflateCopy(dst, src);
+    if (r != Z_OK) drop(gd);
+    else sync_out(gd, dst);
+    set_ret32(t, uint32_t(r));
+}
+
 // int deflateInit2_(strm, level, method, windowBits, memLevel, strategy, version, stream_size)
 void t_deflateInit2(GuestThread& t) {
     ArgCursor c{t};
@@ -157,6 +192,10 @@ void register_zlib() {
     add("inflateInit_", t_inflateInit);
     add("inflate", t_stream_op<::inflate>);
     add("inflateEnd", t_stream_end<::inflateEnd>);
+    add("deflateReset", t_stream_reset<::deflateReset>);
+    add("inflateReset", t_stream_reset<::inflateReset>);
+    add("inflateSetDictionary", t_inflate_set_dictionary);
+    add("inflateCopy", t_inflate_copy);
     add("compress", t_buffer_op<::compress>);
     add("uncompress", t_buffer_op<::uncompress>);
     add("crc32", H32_WRAP(h_crc32, uint32_t(uint32_t, const Bytef*, uint32_t)));

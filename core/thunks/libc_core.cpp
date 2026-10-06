@@ -129,10 +129,6 @@ void t_find_exidx(GuestThread& t) {
 }
 
 // ---- environment / process ----
-void t_getenv(GuestThread& t) {
-    H32_DEBUG("getenv(\"%s\") -> NULL", mem().str(t.regs()[0]));
-    set_ret32(t, 0);
-}
 void t_system(GuestThread& t) {
     H32_WARN("guest system(\"%s\") refused", mem().str(t.regs()[0]));
     set_ret32(t, uint32_t(-1));
@@ -172,6 +168,26 @@ void t_qsort(GuestThread& t) {
     std::vector<uint8_t> tmp(size_t(n) * size);
     for (uint32_t i = 0; i < n; i++) std::memcpy(&tmp[size_t(i) * size], mem().ptr<uint8_t>(base + idx[i] * size), size);
     std::memcpy(mem().ptr<uint8_t>(base), tmp.data(), tmp.size());
+}
+
+// void* bsearch(const void* key, const void* base, size_t n, size_t size, int (*cmp)(const void*, const void*))
+void t_bsearch(GuestThread& t) {
+    ArgCursor c{t};
+    gaddr key = c.word(), base = c.word();
+    uint32_t n = c.word(), size = c.word();
+    gaddr cmp = c.word();
+    uint32_t lo = 0, hi = n;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        gaddr elem = base + mid * size;
+        GuestArgs ga;
+        ga.u32(key).u32(elem);
+        int32_t r = int32_t(t.call(cmp, ga).r0);
+        if (r == 0) return set_ret32(t, elem);
+        if (r < 0) hi = mid;
+        else lo = mid + 1;
+    }
+    set_ret32(t, 0);
 }
 
 // ---- __aeabi memory helpers (note the argument orders) ----
@@ -247,10 +263,10 @@ void register_libc_core() {
     add("_longjmp", t_longjmp);
 
     add("__gnu_Unwind_Find_exidx", t_find_exidx);
-    add("getenv", t_getenv);
     add("system", t_system);
     add("syscall", t_syscall);
     add("qsort", t_qsort);
+    add("bsearch", t_bsearch);
 
     for (const char* n : {"__aeabi_memcpy", "__aeabi_memcpy4", "__aeabi_memcpy8"}) add(n, t_aeabi_memcpy);
     for (const char* n : {"__aeabi_memmove", "__aeabi_memmove4", "__aeabi_memmove8"}) add(n, t_aeabi_memmove);

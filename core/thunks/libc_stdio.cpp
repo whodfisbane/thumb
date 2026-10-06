@@ -1,7 +1,7 @@
 // <stdio.h>, file system calls, directories.
 #include <dirent.h>
 #include <fcntl.h>
-#if defined(__ANDROID__) && defined(THUMB_DEV_OBB_FETCH)
+#if defined(__ANDROID__) && defined(THUMB_DEV)
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -34,10 +34,10 @@ void add_path_mapping(const std::string& guest_prefix, const std::string& host_p
     H32_INFO("path map: %s -> %s", guest_prefix.c_str(), host_prefix.c_str());
 }
 
-#if defined(__ANDROID__) && defined(THUMB_DEV_OBB_FETCH)
+#if defined(__ANDROID__) && defined(THUMB_DEV)
 namespace {
 
-// DEV BUILDS ONLY (THUMB_DEV_OBB_FETCH): any app on the device could listen on
+// DEV BUILDS ONLY (THUMB_DEV): any app on the device could listen on
 // this port, so release builds must never contain this.
 // If a file under Android/obb/ is missing, fetch it
 // once from http://127.0.0.1:47070/<name>. With `adb reverse tcp:47070
@@ -131,7 +131,7 @@ std::string map_path(const char* p) {
         for (auto& [from, to] : g_path_map)
             if (s.compare(0, from.size(), from) == 0) return to + s.substr(from.size());
     }
-#if defined(__ANDROID__) && defined(THUMB_DEV_OBB_FETCH)
+#if defined(__ANDROID__) && defined(THUMB_DEV)
     maybe_fetch_obb(s);
 #endif
     return s;
@@ -170,10 +170,13 @@ FILE* make_console(bool) { return stderr; }
 
 void init_std_files() {
     g_sF = mem().alloc_static(bionic::kFileSize * 3, 8);
-    std::lock_guard lk(g_files_mutex);
-    g_files[g_sF] = stdin;
-    g_files[g_sF + bionic::kFileSize] = make_console(false);
-    g_files[g_sF + 2 * bionic::kFileSize] = make_console(true);
+    {
+        std::lock_guard lk(g_files_mutex);
+        g_files[g_sF] = stdin;
+        g_files[g_sF + bionic::kFileSize] = make_console(false);
+        g_files[g_sF + 2 * bionic::kFileSize] = make_console(true);
+    }
+    for (int i = 0; i < 3; i++) sync_guest_file(g_sF + gaddr(i) * bionic::kFileSize);
 }
 
 }  // namespace
@@ -192,8 +195,11 @@ FILE* host_file(gaddr f) {
 gaddr guest_file_wrap(FILE* host) {
     if (!host) return 0;
     gaddr g = mem().calloc(1, bionic::kFileSize);
-    std::lock_guard lk(g_files_mutex);
-    g_files[g] = host;
+    {
+        std::lock_guard lk(g_files_mutex);
+        g_files[g] = host;
+    }
+    sync_guest_file(g);
     return g;
 }
 
@@ -203,6 +209,40 @@ void guest_file_forget(gaddr f) {
         g_files.erase(f);
     }
     if (f < g_sF || f >= g_sF + 3 * bionic::kFileSize) mem().free(f);
+}
+
+// Old bionic `struct __sFILE` layout (BSD stdio), 32-bit:
+//   0 _p, 4 _r, 8 _w, 12 short _flags, 14 short _file, ...
+// We keep _r/_w at 0 so inline getc/putc macros always call the real functions.
+namespace sfile {
+constexpr gaddr kFlags = 12, kFile = 14;
+constexpr uint16_t kRead = 0x0004, kWrite = 0x0008, kRw = 0x0010, kEof = 0x0020, kErr = 0x0040;
+}  // namespace sfile
+
+void sync_guest_file(gaddr g) {
+    FILE* f;
+    {
+        std::lock_guard lk(g_files_mutex);
+        auto it = g_files.find(g);
+        if (it == g_files.end()) return;
+        f = it->second;
+    }
+    uint16_t flags = mem().read<uint16_t>(g + sfile::kFlags);
+    flags = uint16_t((flags & ~(sfile::kEof | sfile::kErr)) | sfile::kRw | 0x8000);
+    if (std::feof(f)) flags |= sfile::kEof;
+    if (std::ferror(f)) flags |= sfile::kErr;
+    mem().write<uint16_t>(g + sfile::kFlags, flags);
+    mem().write<int16_t>(g + sfile::kFile, int16_t(fileno(f)));
+}
+
+FILE* host_file_for_call(gaddr g) {
+    FILE* f = host_file(g);
+    if (!f) return nullptr;
+    // The guest may have cleared EOF/error with an inline clearerr() macro:
+    // our marker bit says we synced before, and the bits are now gone.
+    uint16_t flags = mem().read<uint16_t>(g + sfile::kFlags);
+    if ((flags & 0x8000) && !(flags & (sfile::kEof | sfile::kErr)) && (std::feof(f) || std::ferror(f))) std::clearerr(f);
+    return f;
 }
 
 bool is_guest_console(gaddr f) { return f >= g_sF + bionic::kFileSize && f < g_sF + 3 * bionic::kFileSize; }
@@ -233,6 +273,24 @@ void t_fdopen(GuestThread& t) {
     FILE* f = ::fdopen(int32_t(t.regs()[0]), mem().str(t.regs()[1]));
     sync_guest_errno(t);
     set_ret32(t, guest_file_wrap(f));
+}
+
+// FILE* freopen(const char* path, const char* mode, FILE* stream) — the guest FILE* stays the same
+void t_freopen(GuestThread& t) {
+    gaddr g = t.regs()[2];
+    FILE* f = host_file(g);
+    if (!f) return set_ret32(t, 0);
+    const char* gp = mem().str(t.regs()[0]);
+    std::string path = gp ? map_path(gp) : std::string();
+    errno = 0;
+    FILE* r = std::freopen(gp ? path.c_str() : nullptr, mem().str(t.regs()[1]), f);
+    sync_guest_errno(t);
+    if (!r) return set_ret32(t, 0);
+    {
+        std::lock_guard lk(g_files_mutex);
+        g_files[g] = r;
+    }
+    set_ret32(t, g);
 }
 
 void t_tmpfile(GuestThread& t) { set_ret32(t, guest_file_wrap(std::tmpfile())); }
@@ -500,6 +558,7 @@ void register_libc_stdio() {
     add("fopen", t_fopen);
     add("fdopen", t_fdopen);
     add("tmpfile", t_tmpfile);
+    add("freopen", t_freopen);
     add("fclose", t_fclose);
     H32_ADD(fread, size_t(void*, size_t, size_t, FILE*));
     H32_ADD(fwrite, size_t(const void*, size_t, size_t, FILE*));

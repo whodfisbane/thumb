@@ -21,6 +21,12 @@ namespace h32 {
 FILE* guest_proc_maps();
 
 namespace {
+std::mutex g_maps_lock;
+std::unordered_map<gaddr, uint32_t> g_mappings;  // guest mmap allocations -> size
+int32_t neg_errno(int e) { return -e; }
+}  // namespace
+
+namespace {
 
 // ARM EABI syscall numbers.
 enum : uint32_t {
@@ -29,29 +35,23 @@ enum : uint32_t {
     kOpenat = 322, kCacheflush = 0x0F0002,
 };
 
-std::mutex g_maps_lock;
-std::unordered_map<gaddr, uint32_t> g_mappings;  // guest mmap allocations -> size
 
-int32_t neg_errno(int e) { return -e; }
+}  // namespace
 
-int32_t sys_mmap2(GuestThread& t) {
-    auto& r = t.regs();
-    uint32_t len = r[1];
-    int32_t flags = int32_t(r[3]);
-    int fd = int32_t(r[4]);
-    uint64_t offset = uint64_t(r[5]) * 4096;
+// mmap for the guest; returns the guest address or -errno.
+int32_t guest_mmap(gaddr hint, uint32_t len, uint32_t prot, int32_t flags, int fd, uint64_t offset) {
     if (len == 0) return neg_errno(EINVAL);
     uint32_t size = (len + 0xFFF) & ~0xFFFu;
     if (flags & 0x10 /*MAP_FIXED*/) {
         // Guest memory is always mapped, so a fixed mapping just replaces the
         // contents of that range (packers use this to unpack over themselves).
-        gaddr a = r[0];
+        gaddr a = hint;
         if ((a & 0xFFF) || a < Arena::kNullGuardEnd || uint64_t(a) + size > 0xFFFF0000ull) return neg_errno(EINVAL);
         std::memset(mem().ptr<void>(a), 0, size);
         if (!(flags & 0x20 /*MAP_ANONYMOUS*/) && fd >= 0 && ::pread(fd, mem().ptr<void>(a), len, off_t(offset)) < 0)
             return neg_errno(errno);
         GuestThread::invalidate_code(a, size);
-        H32_DEBUG("mmap2(MAP_FIXED 0x%08x, len=0x%x, prot=%u, fd=%d)", a, len, r[2], fd);
+        H32_DEBUG("mmap(MAP_FIXED 0x%08x, len=0x%x, prot=%u, fd=%d)", a, len, prot, fd);
         return int32_t(a);
     }
     gaddr a = mem().memalign(4096, size);
@@ -67,12 +67,11 @@ int32_t sys_mmap2(GuestThread& t) {
     }
     std::lock_guard lk(g_maps_lock);
     g_mappings[a] = size;
-    H32_DEBUG("mmap2(len=0x%x, prot=%u, flags=0x%x, fd=%d) -> 0x%08x", len, r[2], flags, fd, a);
+    H32_DEBUG("mmap(len=0x%x, prot=%u, flags=0x%x, fd=%d) -> 0x%08x", len, prot, flags, fd, a);
     return int32_t(a);
 }
 
-int32_t sys_munmap(GuestThread& t) {
-    gaddr a = t.regs()[0];
+int32_t guest_munmap(gaddr a) {
     std::lock_guard lk(g_maps_lock);
     auto it = g_mappings.find(a);
     if (it == g_mappings.end()) return 0;  // partial or foreign unmap: ignore
@@ -81,14 +80,45 @@ int32_t sys_munmap(GuestThread& t) {
     return 0;
 }
 
-int32_t sys_open(GuestThread& t, int dirfd, gaddr path_addr, int flags, int mode) {
-    std::string path = map_path(mem().str(path_addr));
+// ARM and arm64 share open() flag values; x86 differs for these four.
+int guest_open_flags(int f) {
+#if defined(__x86_64__)
+    constexpr int kArmDirectory = 040000, kArmNofollow = 0100000, kArmDirect = 0200000, kArmLargefile = 0400000;
+    int out = f & ~(kArmDirectory | kArmNofollow | kArmDirect | kArmLargefile);
+    if (f & kArmDirectory) out |= O_DIRECTORY;
+    if (f & kArmNofollow) out |= O_NOFOLLOW;
+    if (f & kArmDirect) out |= O_DIRECT;
+    return out;
+#else
+    return f;
+#endif
+}
+
+FILE* guest_proc_maps();
+
+// open/openat for the guest (path mapping, synthesized /proc/self/maps); fd or -errno.
+int32_t guest_open(int dirfd, const char* guest_path, int flags, int mode) {
+    std::string path = map_path(guest_path);
     if (path == "/proc/self/maps") {
         FILE* f = guest_proc_maps();
         return f ? ::dup(fileno(f)) : neg_errno(ENOENT);
     }
-    int fd = ::openat(dirfd, path.c_str(), flags, mode);
+    int fd = ::openat(dirfd, path.c_str(), guest_open_flags(flags), mode);
+    H32_DEBUG("open(\"%s\", 0x%x) -> %d", path.c_str(), flags, fd);
     return fd < 0 ? neg_errno(errno) : fd;
+}
+
+namespace {
+
+int32_t sys_mmap2(GuestThread& t) {
+    auto& r = t.regs();
+    return guest_mmap(r[0], r[1], r[2], int32_t(r[3]), int32_t(r[4]), uint64_t(r[5]) * 4096);
+}
+
+int32_t sys_munmap(GuestThread& t) { return guest_munmap(t.regs()[0]); }
+
+int32_t sys_open(GuestThread& t, int dirfd, gaddr path_addr, int flags, int mode) {
+    return guest_open(dirfd, mem().str(path_addr), flags, mode);
 }
 
 int32_t sys_clock_gettime(GuestThread& t) {

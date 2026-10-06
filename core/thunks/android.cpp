@@ -105,11 +105,20 @@ void t_bitmap_unlock(GuestThread& t) {
 #endif
 }
 
+// void __android_log_assert(const char* cond, const char* tag, const char* fmt, ...)
+void t_log_assert(GuestThread& t) {
+    ArgCursor c{t, 3};
+    VarArgs va(c);
+    std::string msg = t.regs()[2] ? guest_format(mem().str(t.regs()[2]), va) : "";
+    fatal("guest assertion [%s] %s: %s", mem().str(t.regs()[1]) ?: "", mem().str(t.regs()[0]) ?: "", msg.c_str());
+}
+
 }  // namespace
 
 namespace thunks {
 
 void register_android() {
+    add("__android_log_assert", t_log_assert);
     add("__android_log_print", t_log_print);
     add("__android_log_vprint", t_log_vprint);
     add("__android_log_write", t_log_write);

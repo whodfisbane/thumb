@@ -1,7 +1,9 @@
 #include "cpu/cpu.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
+#include <thread>
 
 #include <dynarmic/interface/A32/a32.h>
 #include <dynarmic/interface/A32/config.h>
@@ -48,6 +50,10 @@ private:
     bool used_[kMaxProcessors] = {};
 };
 ProcessorIds g_ids;
+
+// Every live guest thread, for debug sampling.
+std::mutex g_threads_mutex;
+std::vector<GuestThread*> g_threads;
 
 // Every live JIT, so code invalidation can reach all threads.
 std::mutex g_jits_mutex;
@@ -203,9 +209,15 @@ GuestThread::GuestThread() {
     errno_addr_ = mem().calloc(1, 4);
     tls_area_ = mem().calloc(64, 4);
     mem().write<uint32_t>(tls_area_, tls_area_);  // slot 0: self
+    std::lock_guard lk(g_threads_mutex);
+    g_threads.push_back(this);
 }
 
 GuestThread::~GuestThread() {
+    {
+        std::lock_guard lk(g_threads_mutex);
+        std::erase(g_threads, this);
+    }
     {
         std::lock_guard lk(g_jits_mutex);
         for (auto& f : frames_) std::erase(g_jits, f->jit.get());
@@ -273,6 +285,10 @@ GuestResult GuestThread::call(gaddr fn, const GuestArgs& args) {
     while (true) {
         f.jit->Run();
         if (f.returned) break;
+        if (exit_requested_) {
+            active_--;
+            return {exit_value_, 0};
+        }
         if (f.faulted) {
             dump_state(f, "guest fault");
             fatal("aborting after guest fault");
@@ -299,6 +315,12 @@ uint32_t GuestThread::arg_word(size_t i) {
     return mem().read<uint32_t>(r[13] + gaddr((i - 4) * 4));
 }
 
+void GuestThread::request_exit(uint32_t value) {
+    exit_requested_ = true;
+    exit_value_ = value;
+    frames_[active_ - 1]->jit->HaltExecution();
+}
+
 void GuestThread::request_jump(const std::array<uint32_t, 16>& regs, uint32_t cpsr) {
     Frame& f = *frames_[active_ - 1];
     f.jump_pending = true;
@@ -315,6 +337,41 @@ void GuestThread::dump_state(Frame& f, const char* why) {
     for (int i = 0; i < 16; i += 4)
         H32_ERROR("r%-2d %08x  r%-2d %08x  r%-2d %08x  r%-2d %08x", i, r[i], i + 1, r[i + 1], i + 2, r[i + 2], i + 3, r[i + 3]);
     H32_ERROR("cpsr %08x", f.jit->Cpsr());
+}
+
+std::vector<std::string> GuestThread::sample_all() {
+    std::vector<std::string> out;
+    std::lock_guard lk(g_threads_mutex);
+    for (GuestThread* t : g_threads) {
+        char buf[64];
+        int depth = t->active_;
+        if (depth == 0) {
+            snprintf(buf, sizeof buf, "thread %p: idle (in host code)", (void*)t);
+            out.emplace_back(buf);
+            continue;
+        }
+        // Racy read of the JIT's last synced PC: good enough to spot a hot loop.
+        uint32_t pc = t->frames_[depth - 1]->jit->Regs()[15];
+        uint32_t lr = t->frames_[depth - 1]->jit->Regs()[14];
+        uint32_t svc = t->last_svc.load();
+        const char* last = svc == ~0u ? "-" : thunks::name_of(svc);
+        snprintf(buf, sizeof buf, "thread %p depth %d: ", (void*)t, depth);
+        out.push_back(std::string(buf) + "pc " + describe_address(pc) + " | lr " + describe_address(lr) + " | last call " +
+                      (last ? last : "?") + " (" + std::to_string(t->thunk_calls.load()) + " calls)");
+    }
+    return out;
+}
+
+void GuestThread::start_sampler(int seconds) {
+    static std::once_flag once;
+    std::call_once(once, [seconds] {
+        std::thread([seconds] {
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::seconds(seconds));
+                for (auto& line : sample_all()) H32_INFO("sample: %s", line.c_str());
+            }
+        }).detach();
+    });
 }
 
 std::string describe_address(gaddr a) {

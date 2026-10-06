@@ -3,6 +3,7 @@
 #include <pthread.h>
 
 #include <atomic>
+#include <memory>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -143,44 +144,253 @@ void t_setspecific(GuestThread& t) {
 }
 
 // ---- threads ----
+// Guest pthread_t values are small ids; joinable threads keep their state
+// here until joined.
+struct ThreadState {
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false, detached = false;
+    uint32_t retval = 0;
+};
+std::mutex g_threads_lock;
+std::unordered_map<uint32_t, std::shared_ptr<ThreadState>> g_threads;
 std::atomic<uint32_t> g_next_tid{2};
+thread_local uint32_t t_self_id = 0;
+
+uint32_t self_id() {
+    if (!t_self_id) t_self_id = g_next_tid++;
+    return t_self_id;
+}
+
+// bionic32 pthread_attr_t (24 bytes): flags, stack_base, stack_size, guard_size, sched_policy, sched_priority
+constexpr uint32_t kAttrDetached = 1;
+void t_attr_init(GuestThread& t) {
+    gaddr a = t.regs()[0];
+    const uint32_t v[6] = {0, 0, 1024 * 1024, 4096, 0, 0};
+    for (int i = 0; i < 6; i++) mem().write<uint32_t>(a + i * 4, v[i]);
+    set_ret32(t, 0);
+}
+void t_attr_ok(GuestThread& t) { set_ret32(t, 0); }
+void t_attr_setdetachstate(GuestThread& t) {
+    gaddr a = t.regs()[0];
+    uint32_t f = mem().read<uint32_t>(a);
+    mem().write<uint32_t>(a, t.regs()[1] == 1 ? (f | kAttrDetached) : (f & ~kAttrDetached));
+    set_ret32(t, 0);
+}
+void t_attr_getdetachstate(GuestThread& t) {
+    mem().write<int32_t>(t.regs()[1], (mem().read<uint32_t>(t.regs()[0]) & kAttrDetached) ? 1 : 0);
+    set_ret32(t, 0);
+}
+void t_attr_setstacksize(GuestThread& t) {
+    mem().write<uint32_t>(t.regs()[0] + 8, t.regs()[1]);
+    set_ret32(t, 0);
+}
+void t_attr_getstacksize(GuestThread& t) {
+    mem().write<uint32_t>(t.regs()[1], mem().read<uint32_t>(t.regs()[0] + 8));
+    set_ret32(t, 0);
+}
+
+void run_tls_destructors(GuestThread& gt) {
+    for (int pass = 0; pass < 4; pass++) {
+        bool any = false;
+        for (int k = 0; k < GuestThread::kMaxKeys; k++) {
+            gaddr v = gt.tls_values[k];
+            if (!v || !g_key_used[k] || !g_key_dtor[k]) continue;
+            gt.tls_values[k] = 0;
+            GuestArgs da;
+            da.u32(v);
+            gt.call(g_key_dtor[k], da);
+            any = true;
+        }
+        if (!any) break;
+    }
+}
 
 // int pthread_create(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)
 void t_create(GuestThread& t) {
     gaddr out = t.regs()[0];
+    gaddr attr = t.regs()[1];
     gaddr start = t.regs()[2];
     gaddr arg = t.regs()[3];
     uint32_t id = g_next_tid++;
+    auto st = std::make_shared<ThreadState>();
+    st->detached = attr && (mem().read<uint32_t>(attr) & kAttrDetached);
+    {
+        std::lock_guard lk(g_threads_lock);
+        g_threads[id] = st;
+    }
     if (out) mem().write<uint32_t>(out, id);
     H32_DEBUG("pthread_create #%u -> %s", id, describe_address(start).c_str());
-    std::thread([start, arg, id] {
+    std::thread([start, arg, id, st] {
+        t_self_id = id;
         auto& gt = GuestThread::current();
         GuestArgs a;
         a.u32(arg);
-        gt.call(start, a);
-        // Run TLS destructors like pthread_exit would.
-        for (int pass = 0; pass < 4; pass++) {
-            bool any = false;
-            for (int k = 0; k < GuestThread::kMaxKeys; k++) {
-                gaddr v = gt.tls_values[k];
-                if (!v || !g_key_used[k] || !g_key_dtor[k]) continue;
-                gt.tls_values[k] = 0;
-                GuestArgs da;
-                da.u32(v);
-                gt.call(g_key_dtor[k], da);
-                any = true;
-            }
-            if (!any) break;
+        uint32_t ret = gt.call(start, a).r0;
+        run_tls_destructors(gt);
+        bool detached;
+        {
+            std::lock_guard lk(st->m);
+            st->done = true;
+            st->retval = ret;
+            detached = st->detached;
+        }
+        st->cv.notify_all();
+        if (detached) {
+            std::lock_guard lk(g_threads_lock);
+            g_threads.erase(id);
         }
         H32_DEBUG("guest thread #%u finished", id);
     }).detach();
     set_ret32(t, 0);
 }
 
-void t_self(GuestThread& t) {
-    thread_local uint32_t id = 0;
-    if (!id) id = g_next_tid++;
-    set_ret32(t, id);
+std::shared_ptr<ThreadState> find_thread(uint32_t id) {
+    std::lock_guard lk(g_threads_lock);
+    auto it = g_threads.find(id);
+    return it == g_threads.end() ? nullptr : it->second;
+}
+
+// int pthread_join(pthread_t, void** retval)
+void t_join(GuestThread& t) {
+    uint32_t id = t.regs()[0];
+    gaddr out = t.regs()[1];
+    auto st = find_thread(id);
+    if (!st) return set_ret32(t, ESRCH);
+    {
+        std::unique_lock lk(st->m);
+        st->cv.wait(lk, [&] { return st->done; });
+        if (out) mem().write<uint32_t>(out, st->retval);
+    }
+    std::lock_guard lk(g_threads_lock);
+    g_threads.erase(id);
+    set_ret32(t, 0);
+}
+
+void t_detach(GuestThread& t) {
+    uint32_t id = t.regs()[0];
+    auto st = find_thread(id);
+    if (!st) return set_ret32(t, ESRCH);
+    bool done;
+    {
+        std::lock_guard lk(st->m);
+        st->detached = true;
+        done = st->done;
+    }
+    if (done) {
+        std::lock_guard lk(g_threads_lock);
+        g_threads.erase(id);
+    }
+    set_ret32(t, 0);
+}
+
+void t_exit(GuestThread& t) {
+    if (t.depth() > 1) H32_WARN("pthread_exit from a nested call: unwinding only the innermost guest frame");
+    t.request_exit(t.regs()[0]);
+}
+
+void t_self(GuestThread& t) { set_ret32(t, self_id()); }
+void t_equal(GuestThread& t) { set_ret32(t, t.regs()[0] == t.regs()[1] ? 1 : 0); }
+
+// Signals are owned by the host process; guests get harmless answers.
+void t_kill(GuestThread& t) {
+    if (t.regs()[1] != 0) H32_WARN("pthread_kill(#%u, %d) ignored", t.regs()[0], int32_t(t.regs()[1]));
+    set_ret32(t, 0);
+}
+void t_sigmask(GuestThread& t) {  // (how, const sigset_t* set, sigset_t* old) — 4-byte sigset on bionic32
+    if (gaddr old = t.regs()[2]) mem().write<uint32_t>(old, 0);
+    set_ret32(t, 0);
+}
+
+// ---- mutex attributes: mutexes are always recursive, so just record the type ----
+void t_mutexattr_init(GuestThread& t) {
+    mem().write<uint32_t>(t.regs()[0], 0);
+    set_ret32(t, 0);
+}
+void t_mutexattr_settype(GuestThread& t) {
+    mem().write<uint32_t>(t.regs()[0], t.regs()[1]);
+    set_ret32(t, 0);
+}
+void t_mutexattr_gettype(GuestThread& t) {
+    mem().write<uint32_t>(t.regs()[1], mem().read<uint32_t>(t.regs()[0]));
+    set_ret32(t, 0);
+}
+
+// ---- semaphores (guest sem_t is 4 bytes) ----
+struct Sem {
+    std::mutex m;
+    std::condition_variable cv;
+    uint32_t count = 0;
+};
+std::mutex g_sems_lock;
+std::unordered_map<gaddr, Sem*> g_sems;
+
+Sem* host_sem(gaddr g) {
+    std::lock_guard lk(g_sems_lock);
+    auto& s = g_sems[g];
+    if (!s) s = new Sem();
+    return s;
+}
+
+void t_sem_init(GuestThread& t) {  // (sem, pshared, value)
+    Sem* s = host_sem(t.regs()[0]);
+    std::lock_guard lk(s->m);
+    s->count = t.regs()[2];
+    set_ret32(t, 0);
+}
+void t_sem_destroy(GuestThread& t) {
+    std::lock_guard lk(g_sems_lock);
+    auto it = g_sems.find(t.regs()[0]);
+    if (it != g_sems.end()) {
+        delete it->second;
+        g_sems.erase(it);
+    }
+    set_ret32(t, 0);
+}
+void t_sem_post(GuestThread& t) {
+    Sem* s = host_sem(t.regs()[0]);
+    {
+        std::lock_guard lk(s->m);
+        s->count++;
+    }
+    s->cv.notify_one();
+    set_ret32(t, 0);
+}
+void t_sem_wait(GuestThread& t) {
+    Sem* s = host_sem(t.regs()[0]);
+    std::unique_lock lk(s->m);
+    s->cv.wait(lk, [&] { return s->count > 0; });
+    s->count--;
+    set_ret32(t, 0);
+}
+void t_sem_trywait(GuestThread& t) {
+    Sem* s = host_sem(t.regs()[0]);
+    std::lock_guard lk(s->m);
+    if (s->count == 0) {
+        mem().write<int32_t>(t.errno_addr(), EAGAIN);
+        return set_ret32(t, uint32_t(-1));
+    }
+    s->count--;
+    set_ret32(t, 0);
+}
+void t_sem_timedwait(GuestThread& t) {  // (sem, const struct timespec* abstime) — CLOCK_REALTIME
+    Sem* s = host_sem(t.regs()[0]);
+    gaddr ts = t.regs()[1];
+    auto since = std::chrono::seconds(mem().read<int32_t>(ts)) + std::chrono::nanoseconds(mem().read<int32_t>(ts + 4));
+    auto deadline = std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(since));
+    std::unique_lock lk(s->m);
+    if (!s->cv.wait_until(lk, deadline, [&] { return s->count > 0; })) {
+        mem().write<int32_t>(t.errno_addr(), ETIMEDOUT);
+        return set_ret32(t, uint32_t(-1));
+    }
+    s->count--;
+    set_ret32(t, 0);
+}
+void t_sem_getvalue(GuestThread& t) {
+    Sem* s = host_sem(t.regs()[0]);
+    std::lock_guard lk(s->m);
+    mem().write<int32_t>(t.regs()[1], int32_t(s->count));
+    set_ret32(t, 0);
 }
 
 }  // namespace
@@ -206,6 +416,43 @@ void register_libc_pthread() {
     add("pthread_setspecific", t_setspecific);
     add("pthread_create", t_create);
     add("pthread_self", t_self);
+    add("pthread_join", t_join);
+    add("pthread_detach", t_detach);
+    add("pthread_exit", t_exit);
+    add("pthread_equal", t_equal);
+    add("pthread_kill", t_kill);
+    add("pthread_sigmask", t_sigmask);
+    add("sigprocmask", t_sigmask);
+    add("pthread_attr_init", t_attr_init);
+    add("pthread_attr_destroy", t_attr_ok);
+    add("pthread_attr_setdetachstate", t_attr_setdetachstate);
+    add("pthread_attr_getdetachstate", t_attr_getdetachstate);
+    add("pthread_attr_setstacksize", t_attr_setstacksize);
+    add("pthread_attr_getstacksize", t_attr_getstacksize);
+    add("pthread_attr_setschedpolicy", t_attr_ok);
+    add("pthread_attr_setschedparam", t_attr_ok);
+    add("pthread_attr_setguardsize", t_attr_ok);
+    add("pthread_setname_np", t_attr_ok);
+    add("pthread_setschedparam", t_attr_ok);
+    add("pthread_mutexattr_init", t_mutexattr_init);
+    add("pthread_mutexattr_destroy", t_attr_ok);
+    add("pthread_mutexattr_settype", t_mutexattr_settype);
+    add("pthread_mutexattr_gettype", t_mutexattr_gettype);
+    add("pthread_mutexattr_setpshared", t_attr_ok);
+    add("pthread_condattr_init", t_attr_ok);
+    add("pthread_condattr_destroy", t_attr_ok);
+    add("pthread_condattr_setclock", t_attr_ok);
+    add("sem_init", t_sem_init);
+    add("sem_destroy", t_sem_destroy);
+    add("sem_post", t_sem_post);
+    add("sem_wait", t_sem_wait);
+    add("sem_trywait", t_sem_trywait);
+    add("sem_timedwait", t_sem_timedwait);
+    add("sem_getvalue", t_sem_getvalue);
+    add("sched_yield", +[](GuestThread& t) {
+        std::this_thread::yield();
+        set_ret32(t, 0);
+    });
 }
 
 }  // namespace thunks

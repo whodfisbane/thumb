@@ -178,11 +178,46 @@ void t_iswctype(GuestThread& t) {
     set_ret32(t, std::iswctype(wint_t(t.regs()[0]), std::wctype(kWctypeNames[idx])) ? 1 : 0);
 }
 
+// int strerror_r(int errnum, char* buf, size_t n) — POSIX version on bionic
+void t_strerror_r(GuestThread& t) {
+    const char* msg = std::strerror(int32_t(t.regs()[0]));
+    char* buf = mem().ptr<char>(t.regs()[1]);
+    size_t n = t.regs()[2];
+    if (!buf || n == 0) return set_ret32(t, ERANGE);
+    std::strncpy(buf, msg, n - 1);
+    buf[n - 1] = 0;
+    set_ret32(t, std::strlen(msg) >= n ? ERANGE : 0);
+}
+
+// const short* _tolower_tab_ / _toupper_tab_: 257 entries, index 0 is EOF.
+gaddr make_case_table(int (*fn)(int)) {
+    gaddr table = mem().alloc_static(257 * 2, 4);
+    mem().write<int16_t>(table, -1);
+    for (int c = 0; c < 256; c++) mem().write<int16_t>(table + 2 + c * 2, int16_t(c < 128 ? fn(c) : c));
+    gaddr var = mem().alloc_static(4, 4);
+    mem().write<uint32_t>(var, table);
+    return var;
+}
+
 }  // namespace
 
 namespace thunks {
 
 void register_libc_string() {
+    add("strerror_r", t_strerror_r);
+    add("strtoimax", t_strto_int<long long, std::strtoll>);
+    add("strtoumax", t_strto_int<unsigned long long, std::strtoull>);
+    add_data("_tolower_tab_", make_case_table(::tolower));
+    add_data("_toupper_tab_", make_case_table(::toupper));
+    H32_ADD(isblank, int(int));
+    // size_t mbrlen(const char* s, size_t n, mbstate_t* ps) == mbrtowc(NULL, s, n, ps)
+    add("mbrlen", +[](GuestThread& t) {
+        auto& r = t.regs();
+        r[2] = r[1];
+        r[1] = r[0];
+        r[0] = 0;
+        t_mbrtowc(t);
+    });
     H32_ADD(memcmp, int(const void*, const void*, size_t));
     H32_ADD(memcpy, void*(void*, const void*, size_t));
     H32_ADD(memmove, void*(void*, const void*, size_t));
@@ -246,6 +281,18 @@ void register_libc_string() {
     H32_ADD(wmemmove, wchar_t*(wchar_t*, const wchar_t*, size_t));
     H32_ADD(wmemset, wchar_t*(wchar_t*, wchar_t, size_t));
     add("wmemchr", H32_WRAP(h_wmemchr, const wchar_t*(const wchar_t*, wchar_t, size_t)));
+    add("iswalpha", H32_WRAP(::iswalpha, int(wint_t)));
+    add("iswalnum", H32_WRAP(::iswalnum, int(wint_t)));
+    add("iswcntrl", H32_WRAP(::iswcntrl, int(wint_t)));
+    add("iswdigit", H32_WRAP(::iswdigit, int(wint_t)));
+    add("iswlower", H32_WRAP(::iswlower, int(wint_t)));
+    add("iswupper", H32_WRAP(::iswupper, int(wint_t)));
+    add("iswprint", H32_WRAP(::iswprint, int(wint_t)));
+    add("iswpunct", H32_WRAP(::iswpunct, int(wint_t)));
+    add("iswspace", H32_WRAP(::iswspace, int(wint_t)));
+    add("iswxdigit", H32_WRAP(::iswxdigit, int(wint_t)));
+    add("iswgraph", H32_WRAP(::iswgraph, int(wint_t)));
+    add("iswblank", H32_WRAP(::iswblank, int(wint_t)));
     H32_ADD(towlower, wint_t(wint_t));
     H32_ADD(towupper, wint_t(wint_t));
     add("btowc", H32_WRAP(h_btowc, wint_t(int)));

@@ -2,6 +2,7 @@
 
 #include <ffi.h>
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -14,6 +15,10 @@
 #include "thunks/wrap.h"
 
 namespace h32::jni {
+
+// Keep pinned guest array buffers coherent with their Java arrays (see below).
+void sync_pinned_to_host(JNIEnv* env);
+void sync_pinned_to_guest(JNIEnv* env);
 
 namespace {
 
@@ -282,7 +287,10 @@ void call_slot(GuestThread& t) {
         return put_jvalue(t, Ret, jvalue{});
     }
     H32_TRACE("jni: call %s%s", mi->name.c_str(), mi->sig.c_str());
-    put_jvalue(t, Ret, invoke(env, Target, Ret, obj, cls, mid, a.data()));
+    sync_pinned_to_host(env);
+    jvalue result = invoke(env, Target, Ret, obj, cls, mid, a.data());
+    sync_pinned_to_guest(env);
+    put_jvalue(t, Ret, result);
 }
 
 // ------------------------------------------------------ manual slots ----
@@ -324,105 +332,129 @@ void t_get_string_chars(GuestThread& t) {
 // Release*Chars(env, string, chars): the guest copy is all that remains.
 void t_release_chars(GuestThread& t) { mem().free(t.regs()[2]); }
 
-// Get<T>ArrayElements: copy into guest memory; Release copies back.
+// ---- pinned primitive arrays ----
+// Get<T>ArrayElements / GetPrimitiveArrayCritical give the guest a buffer in
+// guest memory. Many games keep that buffer and write into it while calling
+// Java (e.g. an audio thread filling a byte[] for AudioTrack.write), so the
+// buffer is kept coherent: guest -> Java before every guest-to-Java call, and
+// Java -> guest after it and whenever Java calls into the guest.
 struct PinnedArray {
-    void* host;  // host element pointer (from Get<T>ArrayElements)
+    jarray array;  // global reference
+    char kind;     // JNI type char
+    jsize length;
     size_t bytes;
 };
 std::mutex g_pinned_mutex;
 std::unordered_map<gaddr, PinnedArray> g_pinned;
+std::atomic<size_t> g_pinned_count{0};
 
-template <class T, class Arr, T* (*JNINativeInterface::*Get)(JNIEnv*, Arr, jboolean*)>
-void t_get_elements(GuestThread& t) {
-    JNIEnv* env = host_env();
-    auto arr = static_cast<Arr>(ref_to_host(t.regs()[1]));
-    if (gaddr is_copy = t.regs()[2]) mem().write<uint8_t>(is_copy, JNI_TRUE);
-    T* h = (env->functions->*Get)(env, arr, nullptr);
-    if (!h) return set_ret32(t, 0);
-    size_t bytes = size_t(env->GetArrayLength(arr)) * sizeof(T);
-    gaddr g = mem().malloc(bytes);
-    std::memcpy(mem().ptr<void>(g), h, bytes);
-    {
-        std::lock_guard lk(g_pinned_mutex);
-        g_pinned[g] = {h, bytes};
+size_t kind_size(char k) {
+    switch (k) {
+    case 'Z': case 'B': return 1;
+    case 'C': case 'S': return 2;
+    case 'I': case 'F': return 4;
+    default: return 8;
     }
-    set_ret32(t, g);
 }
 
-template <class T, class Arr, void (*JNINativeInterface::*Rel)(JNIEnv*, Arr, T*, jint)>
-void t_release_elements(GuestThread& t) {
-    JNIEnv* env = host_env();
-    auto arr = static_cast<Arr>(ref_to_host(t.regs()[1]));
-    gaddr g = t.regs()[2];
-    jint mode = jint(t.regs()[3]);
+#define H32_REGION_CASES(X) \
+    X('Z', Boolean, jboolean) X('B', Byte, jbyte) X('C', Char, jchar) X('S', Short, jshort) \
+    X('I', Int, jint) X('F', Float, jfloat) X('J', Long, jlong) X('D', Double, jdouble)
+
+void copy_to_guest(JNIEnv* env, const PinnedArray& p, gaddr g) {
+    switch (p.kind) {
+#define X(c, Name, T) case c: env->Get##Name##ArrayRegion(static_cast<T##Array>(p.array), 0, p.length, mem().ptr<T>(g)); break;
+        H32_REGION_CASES(X)
+#undef X
+    }
+}
+
+void copy_to_host(JNIEnv* env, const PinnedArray& p, gaddr g) {
+    switch (p.kind) {
+#define X(c, Name, T) case c: env->Set##Name##ArrayRegion(static_cast<T##Array>(p.array), 0, p.length, mem().ptr<const T>(g)); break;
+        H32_REGION_CASES(X)
+#undef X
+    }
+}
+
+gaddr pin(JNIEnv* env, jarray arr, char kind, gaddr is_copy) {
+    if (!arr) return 0;
+    PinnedArray p{static_cast<jarray>(env->NewGlobalRef(arr)), kind, env->GetArrayLength(arr), 0};
+    p.bytes = size_t(p.length) * kind_size(kind);
+    gaddr g = mem().malloc(p.bytes ? p.bytes : 1);
+    copy_to_guest(env, p, g);
+    // Coherent at every JNI crossing, so for the guest this behaves like a direct pointer.
+    if (is_copy) mem().write<uint8_t>(is_copy, JNI_FALSE);
+    std::lock_guard lk(g_pinned_mutex);
+    g_pinned[g] = p;
+    g_pinned_count = g_pinned.size();
+    return g;
+}
+
+void unpin(JNIEnv* env, gaddr g, jint mode) {
     PinnedArray p{};
     {
         std::lock_guard lk(g_pinned_mutex);
         auto it = g_pinned.find(g);
         if (it == g_pinned.end()) {
-            H32_ERROR("jni: Release*ArrayElements on unknown buffer 0x%08x", g);
+            H32_ERROR("jni: release of unknown array buffer 0x%08x", g);
             return;
         }
         p = it->second;
-        if (mode != JNI_COMMIT) g_pinned.erase(it);
+        if (mode != JNI_COMMIT) {
+            g_pinned.erase(it);
+            g_pinned_count = g_pinned.size();
+        }
     }
-    if (mode != JNI_ABORT) std::memcpy(p.host, mem().ptr<void>(g), p.bytes);
-    (env->functions->*Rel)(env, arr, static_cast<T*>(p.host), mode);
-    if (mode != JNI_COMMIT) mem().free(g);
+    if (mode != JNI_ABORT) copy_to_host(env, p, g);
+    if (mode != JNI_COMMIT) {
+        env->DeleteGlobalRef(p.array);
+        mem().free(g);
+    }
 }
 
-// GetPrimitiveArrayCritical doesn't say the element type, so the element
-// size comes from the array's class.
-size_t element_size(JNIEnv* env, jarray arr) {
-    static const std::pair<const char*, size_t> kinds[] = {{"[B", 1}, {"[Z", 1}, {"[C", 2}, {"[S", 2},
-                                                           {"[I", 4}, {"[F", 4}, {"[J", 8}, {"[D", 8}};
-    for (auto& [name, size] : kinds) {
+// Element kind from the array's class (GetPrimitiveArrayCritical doesn't say).
+char array_kind(JNIEnv* env, jarray arr) {
+    static const char* const kinds = "BZCSIFJD";
+    for (const char* k = kinds; *k; k++) {
+        char name[3] = {'[', *k, 0};
         jclass c = env->FindClass(name);
         bool match = c && env->IsInstanceOf(arr, c);
         if (c) env->DeleteLocalRef(c);
-        if (match) return size;
+        if (match) return *k;
     }
     H32_ERROR("jni: GetPrimitiveArrayCritical on a non-primitive array");
-    return 1;
+    return 'B';
 }
+
+template <char Kind>
+void t_get_elements(GuestThread& t) {
+    set_ret32(t, pin(host_env(), static_cast<jarray>(ref_to_host(t.regs()[1])), Kind, t.regs()[2]));
+}
+
+void t_release_elements(GuestThread& t) { unpin(host_env(), t.regs()[2], jint(t.regs()[3])); }
 
 void t_get_critical(GuestThread& t) {
     JNIEnv* env = host_env();
     auto arr = static_cast<jarray>(ref_to_host(t.regs()[1]));
-    if (gaddr is_copy = t.regs()[2]) mem().write<uint8_t>(is_copy, JNI_TRUE);
-    size_t bytes = size_t(env->GetArrayLength(arr)) * element_size(env, arr);
-    void* h = env->GetPrimitiveArrayCritical(arr, nullptr);
-    if (!h) return set_ret32(t, 0);
-    gaddr g = mem().malloc(bytes);
-    std::memcpy(mem().ptr<void>(g), h, bytes);
-    env->ReleasePrimitiveArrayCritical(arr, h, JNI_ABORT);
-    std::lock_guard lk(g_pinned_mutex);
-    g_pinned[g] = {nullptr, bytes};
-    set_ret32(t, g);
+    set_ret32(t, pin(env, arr, arr ? array_kind(env, arr) : 'B', t.regs()[2]));
 }
 
-void t_release_critical(GuestThread& t) {
-    JNIEnv* env = host_env();
-    auto arr = static_cast<jarray>(ref_to_host(t.regs()[1]));
-    gaddr g = t.regs()[2];
-    jint mode = jint(t.regs()[3]);
-    size_t bytes;
-    {
-        std::lock_guard lk(g_pinned_mutex);
-        auto it = g_pinned.find(g);
-        if (it == g_pinned.end()) return;
-        bytes = it->second.bytes;
-        if (mode != JNI_COMMIT) g_pinned.erase(it);
-    }
-    if (mode != JNI_ABORT) {
-        void* h = env->GetPrimitiveArrayCritical(arr, nullptr);
-        if (h) {
-            std::memcpy(h, mem().ptr<void>(g), bytes);
-            env->ReleasePrimitiveArrayCritical(arr, h, 0);
-        }
-    }
-    if (mode != JNI_COMMIT) mem().free(g);
+}  // namespace
+
+void sync_pinned_to_host(JNIEnv* env) {
+    if (!g_pinned_count.load(std::memory_order_relaxed)) return;
+    std::lock_guard lk(g_pinned_mutex);
+    for (auto& [g, p] : g_pinned) copy_to_host(env, p, g);
 }
+
+void sync_pinned_to_guest(JNIEnv* env) {
+    if (!g_pinned_count.load(std::memory_order_relaxed)) return;
+    std::lock_guard lk(g_pinned_mutex);
+    for (auto& [g, p] : g_pinned) copy_to_guest(env, p, g);
+}
+
+namespace {
 
 void t_get_java_vm(GuestThread& t) {
     if (gaddr out = t.regs()[1]) mem().write<uint32_t>(out, g_guest_vm);
@@ -480,7 +512,9 @@ void native_trampoline(ffi_cif*, void* ret, void** args, void* user) {
         }
     }
     H32_TRACE("jni: Java -> guest %s.%s", nm->info.class_name.c_str(), nm->info.name.c_str());
+    sync_pinned_to_guest(env);
     GuestResult r = GuestThread::current().call(nm->info.guest_fn, ga);
+    sync_pinned_to_host(env);
     switch (nm->ret) {
     case 'V': break;
     case 'Z': *static_cast<ffi_arg*>(ret) = uint8_t(r.r0); break;
@@ -653,8 +687,6 @@ void t_vm_destroy(GuestThread& t) { set_ret32(t, uint32_t(JNI_ERR)); }
 
 // --------------------------------------------------------- slot table ----
 
-#define H32_JNI_MANUAL_GETTERS(X) \
-    X(Boolean, jboolean) X(Byte, jbyte) X(Char, jchar) X(Short, jshort) X(Int, jint) X(Long, jlong) X(Float, jfloat) X(Double, jdouble)
 
 ThunkFn manual_handler(std::string_view name) {
     if (name == "GetMethodID") return t_get_method_id<&JNINativeInterface::GetMethodID>;
@@ -663,15 +695,20 @@ ThunkFn manual_handler(std::string_view name) {
     if (name == "GetStringChars" || name == "GetStringCritical") return t_get_string_chars;
     if (name == "ReleaseStringUTFChars" || name == "ReleaseStringChars" || name == "ReleaseStringCritical") return t_release_chars;
     if (name == "GetPrimitiveArrayCritical") return t_get_critical;
-    if (name == "ReleasePrimitiveArrayCritical") return t_release_critical;
+    if (name == "ReleasePrimitiveArrayCritical") return t_release_elements;
     if (name == "RegisterNatives") return t_register_natives;
     if (name == "GetJavaVM") return t_get_java_vm;
-#define H32_ARRAY_CASE(Name, T)                                                                                       \
-    if (name == "Get" #Name "ArrayElements")                                                                          \
-        return t_get_elements<T, T##Array, &JNINativeInterface::Get##Name##ArrayElements>;                            \
-    if (name == "Release" #Name "ArrayElements")                                                                      \
-        return t_release_elements<T, T##Array, &JNINativeInterface::Release##Name##ArrayElements>;
-    H32_JNI_MANUAL_GETTERS(H32_ARRAY_CASE)
+#define H32_ARRAY_CASE(Name, T, K)                                       \
+    if (name == "Get" #Name "ArrayElements") return t_get_elements<K>; \
+    if (name == "Release" #Name "ArrayElements") return t_release_elements;
+    H32_ARRAY_CASE(Boolean, jboolean, 'Z')
+    H32_ARRAY_CASE(Byte, jbyte, 'B')
+    H32_ARRAY_CASE(Char, jchar, 'C')
+    H32_ARRAY_CASE(Short, jshort, 'S')
+    H32_ARRAY_CASE(Int, jint, 'I')
+    H32_ARRAY_CASE(Long, jlong, 'J')
+    H32_ARRAY_CASE(Float, jfloat, 'F')
+    H32_ARRAY_CASE(Double, jdouble, 'D')
 #undef H32_ARRAY_CASE
     fatal("jni: no manual handler for %.*s", int(name.size()), name.data());
 }

@@ -54,6 +54,7 @@ void register_libc_misc();
 void register_zlib();
 void register_android();
 void register_gles1();
+void register_dl();
 
 }  // namespace thunks
 }  // namespace h32
