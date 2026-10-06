@@ -8,6 +8,8 @@ data class PatchOptions(
     // ---- Build options (apply with or without the overlay) ----
     /** Block calls to known ad SDKs from the start. */
     val adblock: Boolean = true,
+    /** Frame rate cap from the start (0 = no limit). Old games were built for 60. */
+    val fpsLimit: Int = 60,
     /**
      * Compat shims for behaviour modern Android changed (virtual /, positioned
      * asset files). Always on in the UI: they only act where the app would
@@ -23,7 +25,7 @@ data class PatchOptions(
     val overlay: Boolean = true,
     val fpsCounter: Boolean = true,
     val speed: Boolean = false,
-    val fpsLimit: Boolean = false,
+    val fpsLimitControl: Boolean = true,
     val adblockToggle: Boolean = false,
     val keepScreenOn: Boolean = true,
     val rotation: Boolean = true,
@@ -35,12 +37,13 @@ data class PatchOptions(
     fun toJson(): String = org.json.JSONObject().apply {
         put("version", 1)
         put("adblock", adblock)
+        put("fps_limit", fpsLimit)
         put("legacy_fs", legacyFs)
         put("overlay", overlay)
         put("mods", org.json.JSONObject().apply {
             put("fps_counter", overlay && fpsCounter)
             put("speed", overlay && speed)
-            put("fps_limit", overlay && fpsLimit)
+            put("fps_limit", overlay && fpsLimitControl)
             put("adblock", overlay && adblockToggle)
             put("keep_screen_on", overlay && keepScreenOn)
             put("rotation", overlay && rotation)
@@ -71,7 +74,7 @@ data class PatchOptions(
         const val INFO_LEGACY_FS = "Recommended. Old apps expect things modern Android changed: browsing from \"/\", " +
             "asset files positioned for them, and so on. THUMB quietly provides the old behaviour."
         const val WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play."
-        const val WARN_FPS_LIMIT = "Limiting FPS saves battery and fixes games that run too fast on high refresh rate screens. Games that tie their speed to the frame rate will run slower at a lower limit, and motion may look less smooth."
+        const val WARN_FPS_HIGH = "Most legacy games were built for 60 FPS. Running them faster can break physics, animations or game speed (for example characters moving or jumping too fast)."
         const val WARN_ADBLOCK = "Blocks calls to known ad SDKs. Some apps may refuse features or crash if their ads can't load."
         const val WARN_SANDBOX = "Removes access to contacts, accounts, location, phone, SMS, camera, microphone, calendar and sensors. " +
             "Old apps often assume they have these and may crash or lose features (e.g. friend lists, maps, photos)."

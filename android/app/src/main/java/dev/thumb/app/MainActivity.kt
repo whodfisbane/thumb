@@ -354,6 +354,38 @@ private fun SectionDivider() {
     }
 }
 
+/** Build option: typeable FPS limit (0 = none), with a warning above 60. */
+@Composable
+private fun FpsLimitRow(value: Int, onChange: (Int) -> Unit) {
+    var text by remember { mutableStateOf(value.toString()) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("FPS limit", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("Saves battery, keeps old games at their speed (0 = no limit)", color = Muted, fontSize = 12.sp)
+            }
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { new ->
+                    text = new.filter { it.isDigit() }.take(4)
+                    onChange(text.toIntOrNull() ?: 0)
+                },
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                modifier = Modifier.width(84.dp),
+            )
+        }
+        if (value > 60) {
+            var open by remember { mutableStateOf(false) }
+            Text(
+                if (open) "⚠️ Warning ▴" else "⚠️ Warning ▾", color = Warn, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { open = !open }.padding(vertical = 2.dp),
+            )
+            if (open) Text(dev.thumb.app.core.PatchOptions.WARN_FPS_HIGH, color = Warn, fontSize = 12.sp)
+        }
+    }
+}
+
 @Composable
 private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
     val P = dev.thumb.app.core.PatchOptions
@@ -378,6 +410,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     SectionDivider()
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
+    FpsLimitRow(options.fpsLimit) { onChange(options.copy(fpsLimit = it)) }
     OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) },
         info = P.WARN_SANDBOX)
     OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
@@ -391,9 +424,8 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
     OptionRow("Speed slider", "Slow-motion or fast-forward", options.speed, {
         if (it) ask("Include the speed slider?", P.WARN_SPEED) { onChange(options.copy(speed = true)) } else onChange(options.copy(speed = false))
     }, P.WARN_SPEED, enabled = options.overlay, indent = true)
-    OptionRow("FPS limit", "Cap at 60 or 30 FPS: saves battery, fixes too-fast games", options.fpsLimit, {
-        if (it) ask("Include FPS limit?", P.WARN_FPS_LIMIT) { onChange(options.copy(fpsLimit = true)) } else onChange(options.copy(fpsLimit = false))
-    }, P.WARN_FPS_LIMIT, enabled = options.overlay, indent = true)
+    OptionRow("FPS limit control", "Change the FPS limit while playing", options.fpsLimitControl, { onChange(options.copy(fpsLimitControl = it)) },
+        enabled = options.overlay, indent = true)
     OptionRow("Keep screen on", "For reading, loading screens, idle games", options.keepScreenOn, { onChange(options.copy(keepScreenOn = it)) },
         enabled = options.overlay, indent = true)
     OptionRow("Rotation lock", "Auto, landscape or portrait", options.rotation, { onChange(options.copy(rotation = it)) },

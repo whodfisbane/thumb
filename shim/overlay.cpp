@@ -2,6 +2,7 @@
 // patched app as an extra dex) and provides its native methods.
 #include <jni.h>
 
+#include <cstdlib>
 #include <string>
 
 #include "common.h"
@@ -56,16 +57,25 @@ void thumb_start_overlay(JNIEnv* env) {
         env->PopLocalFrame(nullptr);
         return;
     }
-    // Build options that apply with or without the overlay.
-    auto flag = [&](const char* key, bool fallback) {
-        std::string compact;
-        for (char c : options) if (c != ' ' && c != '\n' && c != '\t') compact += c;
+    // Build options that apply with or without the overlay (top-level keys of
+    // a small JSON object written by THUMB).
+    std::string compact;
+    for (char c : options) if (c != ' ' && c != '\n' && c != '\t') compact += c;
+    auto value_at = [&](const char* key) -> std::string::size_type {
         std::string k = std::string("\"") + key + "\":";
         auto at = compact.find(k);
-        if (at == std::string::npos) return fallback;
-        return compact.compare(at + k.size(), 4, "true") == 0;
+        return at == std::string::npos ? at : at + k.size();
+    };
+    auto flag = [&](const char* key, bool fallback) {
+        auto at = value_at(key);
+        return at == std::string::npos ? fallback : compact.compare(at, 4, "true") == 0;
+    };
+    auto number = [&](const char* key, int fallback) {
+        auto at = value_at(key);
+        return at == std::string::npos ? fallback : std::atoi(compact.c_str() + at);
     };
     h32::jni::set_ad_block(flag("adblock", true));
+    h32::timescale::set_fps_limit(number("fps_limit", 0));
     h32::compat::legacy_fs = flag("legacy_fs", true);
     if (!flag("overlay", false)) {
         env->PopLocalFrame(nullptr);

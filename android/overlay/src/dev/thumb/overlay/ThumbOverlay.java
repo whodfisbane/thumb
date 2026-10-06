@@ -62,10 +62,10 @@ public final class ThumbOverlay {
     private static final int MUTED = 0xFF9AA8A2;
     private static final float[] SPEEDS = {0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f};
     private static final String[] ROTATIONS = {"Auto", "Landscape", "Portrait"};
-    private static final int[] FPS_LIMITS = {0, 60, 30};
+    private static int fpsLimitDefault = 60; // the "FPS limit" build option (0 = none)
 
     static final String WARN_SPEED = "Changing game speed can break timing-sensitive games, make audio stutter, or cause desyncs in online play.";
-    static final String WARN_FPS_LIMIT = "Limiting FPS saves battery and fixes games that run too fast on high refresh rate screens. Games that tie their speed to the frame rate will run slower at a lower limit, and motion may look less smooth.";
+    static final String WARN_FPS_HIGH = "Most legacy games were built for 60 FPS. Running them faster can break physics, animations or game speed (for example characters moving or jumping too fast).";
 
     private static SharedPreferences prefs;
     private static Application app;
@@ -90,6 +90,7 @@ public final class ThumbOverlay {
         }
         menuEnabled = options.optBoolean("overlay", false);
         adblockDefault = options.optBoolean("adblock", true);
+        fpsLimitDefault = options.optInt("fps_limit", 60);
         JSONObject mods = options.optJSONObject("mods");
         if (mods == null) mods = new JSONObject();
         modFps = mods.optBoolean("fps_counter");
@@ -156,7 +157,7 @@ public final class ThumbOverlay {
         ViewGroup decor = (ViewGroup) w.getDecorView();
 
         // Persistent mod states, re-applied to every screen of the app.
-        if (modFpsLimit) applyFpsLimit(a, prefs.getInt("fps_limit", 0));
+        applyFpsLimit(a, prefs.getInt("fps_limit", fpsLimitDefault)); // build option, or the menu's choice
         if (modScreenOn) applyScreenOn(a, prefs.getBoolean("screen_on", false));
         if (modRotation) applyRotation(a, prefs.getInt("rotation", 0));
         if (modFullscreen) applyFullscreen(a, prefs.getBoolean("fullscreen", false));
@@ -378,31 +379,46 @@ public final class ThumbOverlay {
         panel.addView(bar);
     }
 
-    private static String fpsLabel(int fps) { return fps == 0 ? "Off" : fps + " FPS"; }
-
+    /** Typeable FPS limit (0 = no limit); above 60 asks first, once. */
     private static void addFpsLimit(final Activity a, LinearLayout panel) {
-        final TextView label = text(a, "FPS limit: " + fpsLabel(prefs.getInt("fps_limit", 0)), 15, Color.WHITE);
-        label.setPadding(0, dp(a, 10), 0, dp(a, 6));
-        label.setOnClickListener(v -> {
-            int current = prefs.getInt("fps_limit", 0);
-            int i = 0;
-            while (i < FPS_LIMITS.length && FPS_LIMITS[i] != current) i++;
-            final int next = FPS_LIMITS[(i + 1) % FPS_LIMITS.length];
-            Runnable apply = () -> {
-                prefs.edit().putInt("fps_limit", next).apply();
-                label.setText("FPS limit: " + fpsLabel(next));
-                applyFpsLimit(a, next);
+        TextView label = text(a, "FPS limit (0 = no limit)", 15, Color.WHITE);
+        label.setPadding(0, dp(a, 10), 0, 0);
+        panel.addView(label);
+        LinearLayout row = new LinearLayout(a);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        final android.widget.EditText field = new android.widget.EditText(a);
+        field.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        field.setText(String.valueOf(prefs.getInt("fps_limit", fpsLimitDefault)));
+        field.setTextColor(Color.WHITE);
+        field.setEms(4);
+        row.addView(field);
+        final TextView status = text(a, "", 13, MUTED);
+        TextView apply = button(a, "APPLY");
+        apply.setOnClickListener(v -> {
+            int fps;
+            try {
+                fps = Math.max(0, Math.min(1000, Integer.parseInt(field.getText().toString().trim())));
+            } catch (NumberFormatException e) {
+                status.setText("Enter a number");
+                return;
+            }
+            final int value = fps;
+            Runnable doApply = () -> {
+                prefs.edit().putInt("fps_limit", value).apply();
+                applyFpsLimit(a, value);
+                status.setText(value == 0 ? "No limit" : "Limited to " + value + " FPS");
             };
-            if (next != 0 && !prefs.getBoolean("fps_limit_warned", false)) {
-                new AlertDialog.Builder(a).setTitle("Limit FPS?").setMessage(WARN_FPS_LIMIT)
-                    .setPositiveButton("Limit", (d, w) -> { prefs.edit().putBoolean("fps_limit_warned", true).apply(); apply.run(); })
+            if (value > 60 && !prefs.getBoolean("fps_high_warned", false)) {
+                new AlertDialog.Builder(a).setTitle("Above 60 FPS?").setMessage(WARN_FPS_HIGH)
+                    .setPositiveButton("Apply", (d, w) -> { prefs.edit().putBoolean("fps_high_warned", true).apply(); doApply.run(); })
                     .setNegativeButton("Cancel", null).show();
             } else {
-                apply.run();
+                doApply.run();
             }
         });
-        panel.addView(label);
-        panel.addView(text(a, "Tap to switch: Off → 60 → 30", 12, MUTED));
+        row.addView(apply);
+        panel.addView(row);
+        panel.addView(status);
     }
 
     private static void addRotation(final Activity a, LinearLayout panel) {
