@@ -331,13 +331,13 @@ private fun IdleCard(onPick: () -> Unit) = PanelCard {
     TButton(onClick = { if (prefs.getBoolean("own_apps_ok", false)) onPick() else ask = true }, modifier = Modifier.fillMaxWidth()) { Text(label("Add app"), fontWeight = FontWeight.Bold) }
 }
 
-/** "Your apps": everything THUMB patched on this phone. Tap one for its actions. */
+/** "Patched": everything THUMB patched on this phone. Tap one for its actions. */
 @Composable
 private fun LibraryCard(apps: List<dev.thumb.app.core.Library.Entry>, vm: MainViewModel) = PanelCard {
     val ctx = LocalContext.current
     var open by remember { mutableStateOf<String?>(null) }
     var uninstall by remember { mutableStateOf<dev.thumb.app.core.Library.Entry?>(null) }
-    Text("Your apps", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+    Text("Patched", fontWeight = FontWeight.Bold, fontSize = 18.sp)
     for (app in apps) {
         val outdated = app.runtime != vm.runtimeId
         val expanded = open == app.packageName
