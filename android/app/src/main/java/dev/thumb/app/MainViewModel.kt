@@ -51,7 +51,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val initial: dev.thumb.app.core.PatchOptions = dev.thumb.app.core.PatchOptions(), val update: Boolean = false,
         ) : State()
         /** Installed, but the game's OBB data file isn't in place yet. */
-        data class ObbNeeded(val info: AppInfo, val status: String? = null, val busy: Boolean = false) : State()
+        /** [fromLibrary]: opened from "Your apps" (the app may already have its data file). */
+        data class ObbNeeded(val info: AppInfo, val status: String? = null, val busy: Boolean = false, val fromLibrary: Boolean = false) : State()
         data class Ready(val info: AppInfo, val obbNote: String?) : State()
         data class Failed(val message: String) : State()
     }
@@ -119,7 +120,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = State.Working("Reading ${entry.label}…")
         try {
             val info = withContext(Dispatchers.IO) { readInfo(entry.apks.first()) }
-            _state.value = State.ObbNeeded(info)
+            _state.value = State.ObbNeeded(info, fromLibrary = true)
         } catch (e: Exception) {
             fail(e)
         }

@@ -363,7 +363,7 @@ private fun LibraryCard(apps: List<dev.thumb.app.core.Library.Entry>, vm: MainVi
                 TOutlinedButton(onClick = { vm.repatch(app) }, modifier = Modifier.weight(1f)) { Text(label(if (outdated) "Update" else "Options")) }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (app.needsObb) TTextButton(onClick = { vm.addObb(app) }) { Text(label("Add data file")) }
+                if (app.needsObb) TTextButton(onClick = { vm.addObb(app) }) { Text(label("Data file")) }
                 Spacer(Modifier.weight(1f))
                 TTextButton(onClick = { uninstall = app }) { Text(label("Uninstall"), color = Bad) }
             }
@@ -547,12 +547,21 @@ private fun ObbCard(s: State.ObbNeeded, vm: MainViewModel) = PanelCard {
         onDismiss = { chooser = false },
     )
     AppTitle(s.info)
-    Text("📦 ${s.info.label} needs its data file (OBB)", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-    Text(
-        rich("If you have it, THUMB will **look for it** in a folder you choose. If THUMB can't find it, **pick the file yourself**. " +
-            "It's usually named **${s.info.obbName}**."),
-        color = Muted, fontSize = 13.sp,
-    )
+    if (s.fromLibrary) {
+        Text("📦 Data file (OBB)", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text(
+            rich("Only needed if ${s.info.label} is **missing its data file** or you want to **replace it**. " +
+                "If the app already works, just go back. It's usually named **${s.info.obbName}**."),
+            color = Muted, fontSize = 13.sp,
+        )
+    } else {
+        Text("📦 ${s.info.label} needs its data file (OBB)", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text(
+            rich("If you have it, THUMB will **look for it** in a folder you choose. If THUMB can't find it, **pick the file yourself**. " +
+                "It's usually named **${s.info.obbName}**."),
+            color = Muted, fontSize = 13.sp,
+        )
+    }
     s.status?.let { Text(it, color = if (s.busy) accent() else Warn, fontSize = 13.sp) }
     if (s.busy) {
         LinearProgressIndicator(Modifier.fillMaxWidth(), color = accent(), trackColor = Ink)
@@ -562,7 +571,8 @@ private fun ObbCard(s: State.ObbNeeded, vm: MainViewModel) = PanelCard {
         Text(label("Find automatically"), fontWeight = FontWeight.Bold)
     }
     TOutlinedButton(onClick = { filePicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text(label("Select manually")) }
-    TTextButton(onClick = { vm.skipObb(s) }, modifier = Modifier.fillMaxWidth()) { Text(label("Skip"), color = Muted) }
+    if (s.fromLibrary) TTextButton(onClick = { vm.reset() }, modifier = Modifier.fillMaxWidth()) { Text(label("Cancel"), color = Muted) }
+    else TTextButton(onClick = { vm.skipObb(s) }, modifier = Modifier.fillMaxWidth()) { Text(label("Skip"), color = Muted) }
 }
 
 @Composable
