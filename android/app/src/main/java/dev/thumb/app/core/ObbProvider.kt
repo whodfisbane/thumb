@@ -26,6 +26,8 @@ class ObbProvider : ContentProvider() {
         const val AUTHORITY = "dev.thumb.app.obb"
         /** Marker left after the game took its OBB (prefix + OBB name). */
         const val DELIVERED = "delivered-"
+        /** What the game last reported about its OBB (prefix + OBB name): "1 <size>" or "0". */
+        const val STATUS = "status-"
 
         fun store(context: Context, pkg: String) = File(context.filesDir, "obb/$pkg")
         fun uri(pkg: String, name: String): Uri = Uri.parse("content://$AUTHORITY/$pkg/$name")
@@ -70,5 +72,13 @@ class ObbProvider : ContentProvider() {
     override fun getType(uri: Uri) = "application/octet-stream"
     override fun query(uri: Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?): Cursor? = null
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
-    override fun update(uri: Uri, values: ContentValues?, s: String?, a: Array<out String>?) = 0
+    /** The game reports whether its OBB is in place (shown in THUMB's Library). */
+    override fun update(uri: Uri, values: ContentValues?, s: String?, a: Array<out String>?): Int {
+        val file = authorizedFile(uri)
+        val present = values?.getAsString("present") == "1"
+        val size = values?.getAsString("size")?.toLongOrNull() ?: 0
+        file.parentFile?.mkdirs()
+        File(file.parentFile, STATUS + file.name).writeText(if (present) "1 $size" else "0")
+        return 1
+    }
 }

@@ -52,6 +52,21 @@ jobject thumb_current_application(JNIEnv* env) {
 }
 
 namespace {
+
+// Tells THUMB whether this app's OBB is in place, for its Library
+// ("✓ Data file" / "Data file missing"). Ignored if THUMB isn't installed.
+void report(JNIEnv* env, jobject resolver, jobject uri, bool present, long long size) {
+    jclass cv_cls = env->FindClass("android/content/ContentValues");
+    jobject values = env->NewObject(cv_cls, env->GetMethodID(cv_cls, "<init>", "()V"));
+    jmethodID put = env->GetMethodID(cv_cls, "put", "(Ljava/lang/String;Ljava/lang/String;)V");
+    env->CallVoidMethod(values, put, env->NewStringUTF("present"), env->NewStringUTF(present ? "1" : "0"));
+    env->CallVoidMethod(values, put, env->NewStringUTF("size"), env->NewStringUTF(std::to_string(size).c_str()));
+    jclass cr_cls = env->FindClass("android/content/ContentResolver");
+    env->CallIntMethod(resolver, env->GetMethodID(cr_cls, "update",
+        "(Landroid/net/Uri;Landroid/content/ContentValues;Ljava/lang/String;[Ljava/lang/String;)I"), uri, values, nullptr, nullptr);
+    if (env->ExceptionCheck()) env->ExceptionClear();  // THUMB not installed, or an older THUMB
+}
+
 }  // namespace
 
 // Copies content://dev.thumb.app.obb/<pkg>/main.<versionCode>.<pkg>.obb into the
@@ -92,12 +107,6 @@ void thumb_obb_handover(JNIEnv* env) {
     std::string name = "main." + std::to_string(version) + "." + pkg + ".obb";
     std::string target = dir + "/" + name;
 
-    struct stat st;
-    if (stat(target.c_str(), &st) == 0 && st.st_size > 0) {
-        env->PopLocalFrame(nullptr);
-        return;  // already in place
-    }
-
     // content://dev.thumb.app.obb/<pkg>/<name>
     jclass uri_cls = env->FindClass("android/net/Uri");
     std::string uri_str = std::string("content://") + kAuthority + "/" + pkg + "/" + name;
@@ -105,10 +114,19 @@ void thumb_obb_handover(JNIEnv* env) {
                                               env->NewStringUTF(uri_str.c_str()));
     jobject resolver = env->CallObjectMethod(app, env->GetMethodID(ctx_cls, "getContentResolver", "()Landroid/content/ContentResolver;"));
     jclass cr_cls = env->FindClass("android/content/ContentResolver");
+
+    struct stat st;
+    if (stat(target.c_str(), &st) == 0 && st.st_size > 0) {
+        report(env, resolver, uri, true, st.st_size);
+        env->PopLocalFrame(nullptr);
+        return;  // already in place
+    }
+
     jobject in = env->CallObjectMethod(resolver, env->GetMethodID(cr_cls, "openInputStream", "(Landroid/net/Uri;)Ljava/io/InputStream;"), uri);
     if (env->ExceptionCheck() || !in) {
-        env->ExceptionClear();  // nothing imported in THUMB for this app: the normal case
+        env->ExceptionClear();  // nothing imported in THUMB for this app
         H32_DEBUG("obb: THUMB has no %s to hand over", name.c_str());
+        report(env, resolver, uri, false, 0);
         env->PopLocalFrame(nullptr);
         return;
     }
@@ -147,6 +165,7 @@ void thumb_obb_handover(JNIEnv* env) {
     if (!ok || total == 0 || std::rename(part.c_str(), target.c_str()) != 0) {
         H32_ERROR("obb: handover of %s failed", name.c_str());
         std::remove(part.c_str());
+        report(env, resolver, uri, false, 0);
         env->PopLocalFrame(nullptr);
         return;
     }
@@ -155,5 +174,6 @@ void thumb_obb_handover(JNIEnv* env) {
     // Free THUMB's copy.
     env->CallIntMethod(resolver, env->GetMethodID(cr_cls, "delete", "(Landroid/net/Uri;Ljava/lang/String;[Ljava/lang/String;)I"), uri, nullptr, nullptr);
     clear(env);
+    report(env, resolver, uri, true, total);
     env->PopLocalFrame(nullptr);
 }

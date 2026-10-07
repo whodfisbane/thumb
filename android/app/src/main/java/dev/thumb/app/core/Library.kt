@@ -13,7 +13,8 @@ import java.util.zip.ZipFile
  * so the list is always what's really installed.
  */
 object Library {
-    enum class Obb { NONE, PENDING, DELIVERED }
+    /** UNKNOWN: the app hasn't reported yet (not opened since this THUMB). */
+    enum class Obb { UNKNOWN, PENDING, PRESENT, MISSING }
 
     data class Entry(
         val packageName: String,
@@ -58,10 +59,13 @@ object Library {
             }
             if (!hasThumb) return@mapNotNull null
             val store = ObbProvider.store(context, pi.packageName)
+            val obbName = "main.${pi.longVersionCode}.${pi.packageName}.obb"
+            val status = File(store, ObbProvider.STATUS + obbName).takeIf { it.isFile }?.readText()
             val obb = when {
-                store.listFiles()?.any { it.name.endsWith(".obb") } == true -> Obb.PENDING
-                store.listFiles()?.any { it.name.startsWith(ObbProvider.DELIVERED) } == true -> Obb.DELIVERED
-                else -> Obb.NONE
+                File(store, obbName).isFile -> Obb.PENDING
+                status != null -> if (status.startsWith("1")) Obb.PRESENT else Obb.MISSING
+                File(store, ObbProvider.DELIVERED + obbName).isFile -> Obb.PRESENT
+                else -> Obb.UNKNOWN
             }
             Entry(
                 packageName = pi.packageName,

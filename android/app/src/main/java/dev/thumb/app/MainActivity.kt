@@ -351,7 +351,12 @@ private fun LibraryCard(apps: List<dev.thumb.app.core.Library.Entry>, vm: MainVi
                 Text(app.label, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text("v${app.versionName ?: "?"}", color = Muted, fontSize = 12.sp)
                 if (outdated) Text("Update available", color = accent(), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                if (app.obb == dev.thumb.app.core.Library.Obb.PENDING) Text("Data file moves in when you open it", color = Muted, fontSize = 12.sp)
+                if (app.needsObb) when (app.obb) {
+                    dev.thumb.app.core.Library.Obb.PENDING -> Text("Data file moves in when you open it", color = Muted, fontSize = 12.sp)
+                    dev.thumb.app.core.Library.Obb.PRESENT -> Text("✓ Data file", color = Muted, fontSize = 12.sp)
+                    dev.thumb.app.core.Library.Obb.MISSING -> Text("⚠️ Data file missing", color = Warn, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    dev.thumb.app.core.Library.Obb.UNKNOWN -> Unit
+                }
             }
             Text(if (expanded) "▴" else "▾", color = Muted)
         }
@@ -363,7 +368,9 @@ private fun LibraryCard(apps: List<dev.thumb.app.core.Library.Entry>, vm: MainVi
                 TOutlinedButton(onClick = { vm.repatch(app) }, modifier = Modifier.weight(1f)) { Text(label(if (outdated) "Update" else "Options")) }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (app.needsObb) TTextButton(onClick = { vm.addObb(app) }) { Text(label("Data file")) }
+                if (app.needsObb) TTextButton(onClick = { vm.addObb(app) }) {
+                    Text(label(if (app.obb == dev.thumb.app.core.Library.Obb.MISSING) "Add data file" else "Data file"))
+                }
                 Spacer(Modifier.weight(1f))
                 TTextButton(onClick = { uninstall = app }) { Text(label("Uninstall"), color = Bad) }
             }
