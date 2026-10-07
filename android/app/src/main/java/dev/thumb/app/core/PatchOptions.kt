@@ -6,6 +6,8 @@ package dev.thumb.app.core
  */
 data class PatchOptions(
     // ---- Build options (apply with or without the overlay) ----
+    /** Custom app name shown in the launcher (null or blank: keep the app's own). */
+    val label: String? = null,
     /** Block calls to known ad SDKs from the start. */
     val adblock: Boolean = true,
     /** FPS from the start: "compat" (60, what old games were built for) or "default" (screen decides). */
@@ -33,6 +35,7 @@ data class PatchOptions(
         put("fps_mode", fpsMode)
         put("legacy_fs", legacyFs)
         put("overlay", overlay)
+        label?.takeIf { it.isNotBlank() }?.let { put("label", it) }
         put("sandbox", sandbox)
         put("block_internet", blockInternet)
         // The menu always has every mod; "mods" stays so the runtime format can grow per-mod switches again.
@@ -56,6 +59,7 @@ data class PatchOptions(
             sandbox = json.optBoolean("sandbox", false),
             blockInternet = json.optBoolean("block_internet", false),
             overlay = json.optBoolean("overlay", true),
+            label = json.optString("label").ifBlank { null },
         )
 
         val SENSITIVE_PERMISSIONS = setOf(

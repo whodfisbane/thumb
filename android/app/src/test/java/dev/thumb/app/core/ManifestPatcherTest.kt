@@ -22,7 +22,8 @@ class ManifestPatcherTest {
             val manifest = zip.getInputStream(zip.getEntry("AndroidManifest.xml")).readBytes()
             val (stripped, removed) = ManifestPatcher.removePermissions(manifest, PatchOptions.SENSITIVE_PERMISSIONS + "android.permission.INTERNET")
             println("removed: $removed")
-            val patched = ManifestPatcher.patch(stripped, Patcher.MIN_TARGET_SDK).bytes
+            val renamed = ManifestPatcher.setLabel(stripped, "Wörms 3 (THUMB) 👍") ?: error("setLabel failed")
+            val patched = ManifestPatcher.patch(renamed, Patcher.MIN_TARGET_SDK).bytes
             ZipOutputStream(out.outputStream()).use { zo ->
                 for (e in zip.entries()) {
                     zo.putNextEntry(ZipEntry(e.name))

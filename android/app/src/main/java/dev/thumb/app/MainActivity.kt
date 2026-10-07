@@ -482,11 +482,21 @@ private fun FpsRow(mode: String, onChange: (String) -> Unit) {
 }
 
 @Composable
-private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
+private fun OptionsSection(appLabel: String, options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
     val P = dev.thumb.app.core.PatchOptions
 
     SectionDivider()
     Text("Build options", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
+    // App name: empty keeps the current one.
+    androidx.compose.material3.OutlinedTextField(
+        value = options.label ?: "",
+        onValueChange = { onChange(options.copy(label = it.take(50).ifEmpty { null })) },
+        label = { Text("App name") },
+        placeholder = { Text(appLabel, color = Muted) },
+        supportingText = { Text("Shown under the app icon. Leave empty to keep \"$appLabel\".", color = Muted, fontSize = 12.sp) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
     OptionRow("Block ads", "Stops calls to known ad SDKs from the start", options.adblock, { onChange(options.copy(adblock = it)) }, P.WARN_ADBLOCK)
     FpsRow(options.fpsMode) { onChange(options.copy(fpsMode = it)) }
     OptionRow("Sandbox", "Remove access to contacts, location, camera…", options.sandbox, { onChange(options.copy(sandbox = it)) },
@@ -539,7 +549,7 @@ private fun ReportCard(s: State.Analyzed, onPatch: (dev.thumb.app.core.PatchOpti
             ctx.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${s.info.packageName}")))
         }, modifier = Modifier.fillMaxWidth()) { Text("Uninstall existing app") }
     }
-    OptionsSection(options) { options = it }
+    OptionsSection(s.info.label, options) { options = it }
     TButton(onClick = { onPatch(options) }, modifier = Modifier.fillMaxWidth(), enabled = !s.info.conflictingInstall) {
         Text(if (s.update) "Update & install" else "Patch & install", fontWeight = FontWeight.Bold)
     }

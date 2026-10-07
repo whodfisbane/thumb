@@ -30,6 +30,8 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
         val optionsJson: String,
         val icon: ByteArray?,
         val removePermissions: Set<String> = emptySet(),
+        /** New app name, or null to keep it. */
+        val label: String? = null,
     )
 
     fun patch(input: File, output: File, base: BaseExtras? = null, log: (String) -> Unit = {}): Result {
@@ -58,6 +60,11 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
                                     manifest = stripped
                                     log(if (removed.isEmpty()) "sandbox: no sensitive permissions to remove"
                                         else "sandbox: removed ${removed.joinToString { it.substringAfterLast('.') }}")
+                                }
+                                base?.label?.takeIf { it.isNotBlank() }?.let { label ->
+                                    val renamed = ManifestPatcher.setLabel(manifest, label)
+                                    if (renamed != null) manifest = renamed
+                                    log(if (renamed != null) "renamed to \"$label\"" else "couldn't rename this app (unusual manifest), name kept")
                                 }
                                 val r = ManifestPatcher.patch(manifest, MIN_TARGET_SDK)
                                 targetOld = r.oldTarget

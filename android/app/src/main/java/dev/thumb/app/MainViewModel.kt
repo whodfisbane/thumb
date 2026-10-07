@@ -194,7 +194,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 raw("options: ${options.toJson().replace("\n", " ")}")
                 val unsigned = analyzed.bundle.apks.mapIndexed { i, apk ->
                     val out = File(outDir, "$i-unsigned.apk")
-                    val extras = if (i == 0) Patcher.BaseExtras(overlayDex, options.toJson(runtimeId), icon, options.removedPermissions()) else null
+                    val extras = if (i == 0) Patcher.BaseExtras(overlayDex, options.toJson(runtimeId), icon, options.removedPermissions(), options.label?.trim()) else null
                     val result = Patcher(runtime, stub).patch(apk, out, extras) { raw("patch: $it") }
                     libCount += result.libs.size
                     if (result.newTargetSdk != null) target = result.oldTargetSdk to result.newTargetSdk
