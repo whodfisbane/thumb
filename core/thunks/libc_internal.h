@@ -25,6 +25,7 @@ std::string map_path(const char* guest_path);
 int32_t guest_mmap(gaddr hint, uint32_t len, uint32_t prot, int32_t flags, int fd, uint64_t offset);
 int32_t guest_munmap(gaddr a);
 int32_t guest_open(int dirfd, const char* guest_path, int flags, int mode);
+int32_t guest_raw_syscall(GuestThread& t, uint32_t nr, const uint32_t (&args)[6]);
 
 // ---- FILE* handles ----
 // Guest FILE* values are guest addresses of small placeholder structs; this

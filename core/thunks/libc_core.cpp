@@ -144,10 +144,17 @@ void t_syscall(GuestThread& t) {
     case 20:  // getpid
         set_ret32(t, uint32_t(getpid()));
         return;
-    default:
-        H32_WARN("guest syscall(%u) not supported", nr);
-        mem().write<int32_t>(t.errno_addr(), ENOSYS);
-        set_ret32(t, uint32_t(-1));
+    default: {
+        // Everything else goes through the raw syscall layer (futex, ...).
+        uint32_t args[6];
+        for (int i = 0; i < 6; i++) args[i] = t.arg_word(1 + i);
+        int32_t r = guest_raw_syscall(t, nr, args);
+        if (r < 0 && r > -4096) {
+            mem().write<int32_t>(t.errno_addr(), -r);
+            r = -1;
+        }
+        set_ret32(t, uint32_t(r));
+    }
     }
 }
 

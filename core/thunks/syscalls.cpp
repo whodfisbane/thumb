@@ -122,6 +122,23 @@ int32_t sys_open(GuestThread& t, int dirfd, gaddr path_addr, int flags, int mode
     return guest_open(dirfd, mem().str(path_addr), flags, mode);
 }
 
+// futex(uaddr, op, val, timeout | val2, uaddr2, val3). Guest addresses are
+// arena addresses, so the host futex works on the very same words. The 4th
+// argument is a (32-bit) timespec for the wait ops and a plain number otherwise.
+int32_t sys_futex(gaddr uaddr, int op, uint32_t val, uint32_t arg4, gaddr uaddr2, uint32_t val3) {
+    int cmd = op & 127 & ~256;  // without FUTEX_PRIVATE_FLAG / FUTEX_CLOCK_REALTIME
+    const void* a4 = reinterpret_cast<const void*>(uintptr_t(arg4));
+    timespec ts{};
+    if (cmd == 0 /* WAIT */ || cmd == 9 /* WAIT_BITSET */) {
+        if (arg4) {
+            ts = {mem().read<int32_t>(arg4), mem().read<int32_t>(arg4 + 4)};
+            a4 = &ts;
+        }
+    }
+    long r = ::syscall(SYS_futex, mem().ptr<uint32_t>(uaddr), op, val, a4, mem().ptr<uint32_t>(uaddr2), val3);
+    return r < 0 ? neg_errno(errno) : int32_t(r);
+}
+
 int32_t sys_clock_gettime(GuestThread& t) {
     timespec ts;
     clockid_t clock = clockid_t(t.regs()[0]);
@@ -158,6 +175,7 @@ void t_linux_syscall(GuestThread& t) {
         break;
     case kMadvise: ret = 0; break;
     case kClockGettime: ret = sys_clock_gettime(t); break;
+    case kFutex: ret = sys_futex(r[0], int32_t(r[1]), r[2], r[3], r[4], r[5]); break;
     case kExit:
     case kExitGroup:
         H32_INFO("guest exit syscall(%d)", int32_t(r[0]));
@@ -172,6 +190,20 @@ void t_linux_syscall(GuestThread& t) {
 }
 
 }  // namespace
+
+// libc syscall(nr, ...): run it like a raw "svc #0" with the arguments in
+// r0-r5 and the number in r7. Returns the kernel-style result (-errno on error).
+int32_t guest_raw_syscall(GuestThread& t, uint32_t nr, const uint32_t (&args)[6]) {
+    auto& r = t.regs();
+    uint32_t saved[8];
+    for (int i = 0; i < 8; i++) saved[i] = r[i];
+    for (int i = 0; i < 6; i++) r[i] = args[i];
+    r[7] = nr;
+    t_linux_syscall(t);
+    int32_t ret = int32_t(r[0]);
+    for (int i = 0; i < 8; i++) r[i] = saved[i];
+    return ret;
+}
 
 FILE* guest_proc_maps() {
     FILE* f = std::tmpfile();
