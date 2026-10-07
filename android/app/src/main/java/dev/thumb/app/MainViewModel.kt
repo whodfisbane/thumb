@@ -171,7 +171,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 State.Analyzed(file, bundle, info, report)
             }
             val parts = analyzed.bundle.apks.size
-            step("Checked ${analyzed.info.label}: ${analyzed.report.percent}% compatible" + if (parts > 1) " ($parts-part bundle)" else "")
+            step("Checked ${analyzed.info.label}: ${analyzed.report.verdict.lowercase()} (${analyzed.report.percent}%)" + if (parts > 1) " ($parts-part bundle)" else "")
             _state.value = analyzed
         } catch (e: Exception) {
             fail(e)

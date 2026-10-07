@@ -510,17 +510,26 @@ private fun ReportCard(s: State.Analyzed, onPatch: (dev.thumb.app.core.PatchOpti
         TOutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(label("Back")) }
         return@PanelCard
     }
-    val color = when {
-        r.percent >= 90 -> accent()
-        r.percent >= 75 -> Warn
-        else -> Bad
+    // The verdict up front; the numbers behind it are one tap away.
+    val (emoji, color) = when (r.level) {
+        dev.thumb.app.core.Doctor.Level.GOOD -> "✅" to accent()
+        dev.thumb.app.core.Doctor.Level.PARTIAL -> "⚠️" to Warn
+        dev.thumb.app.core.Doctor.Level.BAD -> "❌" to Bad
     }
-    Text("THUMB Doctor: ${r.percent}%", color = color, fontWeight = FontWeight.Black, fontSize = 22.sp)
-    LinearProgressIndicator(progress = { r.percent / 100f }, modifier = Modifier.fillMaxWidth(), color = color, trackColor = Ink)
-    Text(rich("**${r.verdict}** · ${r.handled}/${r.total} system calls handled"), color = Muted, fontSize = 13.sp)
-    val missing = r.libs.flatMap { it.missing.entries }.groupBy({ it.key }, { it.value.size }).mapValues { it.value.sum() }
-    if (missing.isNotEmpty()) {
-        Text(rich("**Not supported yet:** " + missing.entries.sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }), color = Muted, fontSize = 13.sp)
+    Text("$emoji ${r.verdict}", color = color, fontWeight = FontWeight.Black, fontSize = 22.sp)
+    Text(r.detail, color = Muted, fontSize = 13.sp)
+    var details by remember(s.info.packageName) { mutableStateOf(false) }
+    Text(
+        if (details) "Details ▴" else "Details ▾", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        modifier = Modifier.clickable { details = !details }.padding(vertical = 2.dp),
+    )
+    if (details) {
+        Text("THUMB Doctor: ${r.percent}% · ${r.handled}/${r.total} system functions supported", color = Muted, fontSize = 13.sp)
+        LinearProgressIndicator(progress = { r.percent / 100f }, modifier = Modifier.fillMaxWidth(), color = color, trackColor = Ink)
+        val missing = r.libs.flatMap { it.missing.entries }.groupBy({ it.key }, { it.value.size }).mapValues { it.value.sum() }
+        if (missing.isNotEmpty()) {
+            Text(rich("**Not supported yet:** " + missing.entries.sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }), color = Muted, fontSize = 13.sp)
+        }
     }
     if (s.info.needsObb) Text(rich("📦 Uses an **extra data file (OBB)**: you can add it right after installing."), color = Muted, fontSize = 13.sp)
     if (s.info.conflictingInstall) {

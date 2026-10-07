@@ -19,16 +19,33 @@ object Doctor {
         val error: String? = null,
     )
 
+    enum class Level { GOOD, PARTIAL, BAD }
+
+    private val CRITICAL = setOf("OpenGL ES 2/3", "EGL", "NDK window / assets / input")
+
     data class Report(val libs: List<LibReport>) {
         val handled get() = libs.sumOf { it.handled }
         val total get() = libs.sumOf { it.total }
         val percent get() = if (total == 0) 100 else handled * 100 / total
         val needsThumb get() = libs.isNotEmpty()
+        /** Missing one of these means no picture or no window at all, whatever the percentage. */
+        val critical get() = libs.any { lib -> lib.missing.keys.any { it in CRITICAL } }
+        val level get() = when {
+            percent == 100 -> Level.GOOD
+            percent >= 90 && !critical -> Level.PARTIAL
+            else -> Level.BAD
+        }
         val verdict get() = when {
             !needsThumb -> "No 32-bit libraries: this app doesn't need THUMB"
-            percent == 100 -> "Ready to try"
-            percent >= 90 -> "Worth a try (missing calls are stubbed and may not matter)"
-            else -> "Needs work"
+            level == Level.GOOD -> "Should work"
+            level == Level.PARTIAL -> "Might partly work"
+            else -> "Missing too much"
+        }
+        val detail get() = when (level) {
+            Level.GOOD -> "Everything this app needs from the system is supported."
+            Level.PARTIAL -> "A few functions aren't supported yet. If the app uses them, parts of it may not work."
+            Level.BAD -> if (critical) "It needs graphics or system features THUMB doesn't support yet. You can still try."
+                else "Many functions it needs aren't supported yet. You can still try."
         }
     }
 
