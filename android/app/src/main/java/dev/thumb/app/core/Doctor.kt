@@ -74,10 +74,13 @@ object Doctor {
         return out
     }
 
-    fun check(file: File, supported: Set<String>): Report {
+    fun check(file: File, supported: Set<String>): Report = check(listOf(file), supported)
+
+    /** Checks the libraries of several APKs together (a base APK and its splits). */
+    fun check(files: List<File>, supported: Set<String>): Report {
         val parsed = LinkedHashMap<String, Elf32.Info>()
         val errors = LinkedHashMap<String, String>()
-        for ((name, bytes) in armLibs(file)) {
+        for ((name, bytes) in files.flatMap { armLibs(it).entries }.associate { it.key to it.value }) {
             try {
                 parsed[name] = Elf32(bytes).parse()
             } catch (e: Exception) {

@@ -118,6 +118,14 @@ private fun rich(text: String, highlight: Color? = null) = androidx.compose.ui.t
 private fun label(text: String) = if (LocalHolo.current) text.uppercase() else text
 
 class MainActivity : ComponentActivity() {
+    private val vm by lazy { androidx.lifecycle.ViewModelProvider(this)[MainViewModel::class.java] }
+
+    /** Coming back (e.g. after uninstalling an app): refresh the Library. */
+    override fun onResume() {
+        super.onResume()
+        vm.refreshLibrary()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -170,7 +178,11 @@ private fun ThumbScreen(onToggleHolo: () -> Unit, vm: MainViewModel = viewModel(
         androidx.activity.compose.BackHandler(enabled = canGoBack) { vm.reset() }
         if (!holo && state is State.Idle) Header(onAbout = { aboutOpen = true })
         when (val s = state) {
-            is State.Idle -> IdleCard { picker.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "*/*")) }
+            is State.Idle -> {
+                IdleCard { picker.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "*/*")) }
+                val apps by vm.library.collectAsState()
+                if (apps.isNotEmpty()) LibraryCard(apps, vm)
+            }
             is State.Working -> WorkingCard(s, steps)
             is State.Analyzed -> ReportCard(s, onPatch = { options -> vm.patchAndInstall(s, options) }, onCancel = vm::reset)
             is State.ObbNeeded -> ObbCard(s, vm)
@@ -319,6 +331,61 @@ private fun IdleCard(onPick: () -> Unit) = PanelCard {
     TButton(onClick = { if (prefs.getBoolean("own_apps_ok", false)) onPick() else ask = true }, modifier = Modifier.fillMaxWidth()) { Text(label("Add app"), fontWeight = FontWeight.Bold) }
 }
 
+/** "Your apps": everything THUMB patched on this phone. Tap one for its actions. */
+@Composable
+private fun LibraryCard(apps: List<dev.thumb.app.core.Library.Entry>, vm: MainViewModel) = PanelCard {
+    val ctx = LocalContext.current
+    var open by remember { mutableStateOf<String?>(null) }
+    var uninstall by remember { mutableStateOf<dev.thumb.app.core.Library.Entry?>(null) }
+    Text("Your apps", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+    for (app in apps) {
+        val outdated = app.runtime != vm.runtimeId
+        val expanded = open == app.packageName
+        Row(
+            Modifier.fillMaxWidth().clickable { open = if (expanded) null else app.packageName }.padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            app.icon?.let { Image(it.asImageBitmap(), null, Modifier.size(44.dp)) } ?: Spacer(Modifier.size(44.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(app.label, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("v${app.versionName ?: "?"}", color = Muted, fontSize = 12.sp)
+                if (outdated) Text("Update available", color = accent(), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (app.obb == dev.thumb.app.core.Library.Obb.PENDING) Text("Data file moves in when you open it", color = Muted, fontSize = 12.sp)
+            }
+            Text(if (expanded) "▴" else "▾", color = Muted)
+        }
+        if (expanded) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ctx.packageManager.getLaunchIntentForPackage(app.packageName)?.let { launch ->
+                    TButton(onClick = { ctx.startActivity(launch) }, modifier = Modifier.weight(1f)) { Text(label("Open"), fontWeight = FontWeight.Bold) }
+                }
+                TOutlinedButton(onClick = { vm.repatch(app) }, modifier = Modifier.weight(1f)) { Text(label(if (outdated) "Update" else "Options")) }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (app.needsObb) TTextButton(onClick = { vm.addObb(app) }) { Text(label("Add data file")) }
+                Spacer(Modifier.weight(1f))
+                TTextButton(onClick = { uninstall = app }) { Text(label("Uninstall"), color = Bad) }
+            }
+        }
+    }
+    uninstall?.let { app ->
+        AlertDialog(
+            onDismissRequest = { uninstall = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            title = { Text("Uninstall ${app.label}?") },
+            text = { Text("Its saves and settings on this phone are deleted too. To reinstall, add the app again.", color = Muted) },
+            confirmButton = {
+                TTextButton(onClick = {
+                    uninstall = null
+                    ctx.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${app.packageName}")))
+                }) { Text(label("Uninstall"), color = Bad) }
+            },
+            dismissButton = { TTextButton(onClick = { uninstall = null }) { Text(label("Cancel")) } },
+        )
+    }
+}
+
 @Composable
 private fun WorkingCard(s: State.Working, steps: List<String>) = PanelCard {
     Steps(steps)
@@ -428,7 +495,7 @@ private fun OptionsSection(options: dev.thumb.app.core.PatchOptions, onChange: (
 
 @Composable
 private fun ReportCard(s: State.Analyzed, onPatch: (dev.thumb.app.core.PatchOptions) -> Unit, onCancel: () -> Unit) = PanelCard {
-    var options by remember(s.info.packageName) { mutableStateOf(dev.thumb.app.core.PatchOptions()) }
+    var options by remember(s.info.packageName, s.update) { mutableStateOf(s.initial) }
     val r = s.report
     AppTitle(s.info)
     if (!r.needsThumb) {
@@ -458,7 +525,7 @@ private fun ReportCard(s: State.Analyzed, onPatch: (dev.thumb.app.core.PatchOpti
     }
     OptionsSection(options) { options = it }
     TButton(onClick = { onPatch(options) }, modifier = Modifier.fillMaxWidth(), enabled = !s.info.conflictingInstall) {
-        Text("Patch & install", fontWeight = FontWeight.Bold)
+        Text(if (s.update) "Update & install" else "Patch & install", fontWeight = FontWeight.Bold)
     }
     TOutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text(label("Cancel")) }
 }

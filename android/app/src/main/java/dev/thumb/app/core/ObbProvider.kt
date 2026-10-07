@@ -24,6 +24,8 @@ import java.io.File
 class ObbProvider : ContentProvider() {
     companion object {
         const val AUTHORITY = "dev.thumb.app.obb"
+        /** Marker left after the game took its OBB (prefix + OBB name). */
+        const val DELIVERED = "delivered-"
 
         fun store(context: Context, pkg: String) = File(context.filesDir, "obb/$pkg")
         fun uri(pkg: String, name: String): Uri = Uri.parse("content://$AUTHORITY/$pkg/$name")
@@ -60,7 +62,9 @@ class ObbProvider : ContentProvider() {
     /** The game deletes THUMB's copy once it has its own. */
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
         val file = authorizedFile(uri)
-        return if (file.delete()) 1 else 0
+        if (!file.delete()) return 0
+        runCatching { File(file.parentFile, DELIVERED + file.name).createNewFile() }
+        return 1
     }
 
     override fun getType(uri: Uri) = "application/octet-stream"

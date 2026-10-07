@@ -45,7 +45,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         data object Idle : State()
         /** [confirm]: Android's install confirmation screen, if one is pending. */
         data class Working(val message: String, val confirm: Intent? = null) : State()
-        data class Analyzed(val file: File, val bundle: dev.thumb.app.core.Bundle, val info: AppInfo, val report: Doctor.Report) : State()
+        /** [initial]: options to start from; [update]: re-patching an installed app. */
+        data class Analyzed(
+            val file: File, val bundle: dev.thumb.app.core.Bundle, val info: AppInfo, val report: Doctor.Report,
+            val initial: dev.thumb.app.core.PatchOptions = dev.thumb.app.core.PatchOptions(), val update: Boolean = false,
+        ) : State()
         /** Installed, but the game's OBB data file isn't in place yet. */
         data class ObbNeeded(val info: AppInfo, val status: String? = null, val busy: Boolean = false) : State()
         data class Ready(val info: AppInfo, val obbNote: String?) : State()
@@ -63,7 +67,63 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _console = MutableStateFlow<List<String>>(emptyList())
     val console: StateFlow<List<String>> = _console
 
+    /** Apps THUMB patched on this phone (the Library). */
+    private val _library = MutableStateFlow<List<dev.thumb.app.core.Library.Entry>>(emptyList())
+    val library: StateFlow<List<dev.thumb.app.core.Library.Entry>> = _library
+
     private val context get() = getApplication<Application>()
+
+    /** Identifies this THUMB's runtime + menu; apps patched with another one can be updated. */
+    val runtimeId: String by lazy {
+        val crc = java.util.zip.CRC32()
+        for (a in listOf("runtime/libthumb.so", "runtime/libthumb_stub.so", "runtime/overlay.dex"))
+            context.assets.open(a).use { crc.update(it.readBytes()) }
+        "%08x".format(crc.value)
+    }
+
+    fun refreshLibrary() = viewModelScope.launch {
+        _library.value = withContext(Dispatchers.IO) {
+            runCatching { dev.thumb.app.core.Library.scan(context) }.onFailure { raw("library scan failed: ${describe(it)}") }.getOrDefault(emptyList())
+        }
+    }
+
+    /** Re-patch an installed app: rebuild its original from the installed copy, then the usual options screen. */
+    fun repatch(entry: dev.thumb.app.core.Library.Entry) = viewModelScope.launch {
+        _steps.value = emptyList()
+        _state.value = State.Working("Reading ${entry.label}…")
+        raw("repatch ${entry.packageName}: ${entry.apks.joinToString { it.path }}")
+        try {
+            val analyzed = withContext(Dispatchers.IO) {
+                val dir = File(context.cacheDir, "repatch").apply { deleteRecursively(); mkdirs() }
+                val originals = entry.apks.mapIndexed { i, apk ->
+                    File(dir, "$i.apk").also { out ->
+                        val was = dev.thumb.app.core.Unpatcher.unpatch(apk, out)
+                        raw("unpatch ${apk.name}: ${if (was) "restored original libraries" else "not patched (copied)"} -> ${out.length() / 1024} KB")
+                    }
+                }
+                val bundle = dev.thumb.app.core.Bundle(originals, emptyList())
+                val info = readInfo(originals.first())
+                val report = Doctor.check(originals, supported)
+                State.Analyzed(originals.first(), bundle, info, report, entry.options ?: dev.thumb.app.core.PatchOptions(), update = true)
+            }
+            step("Read the installed ${entry.label}")
+            _state.value = analyzed
+        } catch (e: Exception) {
+            fail(e)
+        }
+    }
+
+    /** Add (or replace) the data file of an installed app. */
+    fun addObb(entry: dev.thumb.app.core.Library.Entry) = viewModelScope.launch {
+        _steps.value = emptyList()
+        _state.value = State.Working("Reading ${entry.label}…")
+        try {
+            val info = withContext(Dispatchers.IO) { readInfo(entry.apks.first()) }
+            _state.value = State.ObbNeeded(info)
+        } catch (e: Exception) {
+            fail(e)
+        }
+    }
     private val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT)
 
     private val supported: Set<String> by lazy {
@@ -133,7 +193,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 raw("options: ${options.toJson().replace("\n", " ")}")
                 val unsigned = analyzed.bundle.apks.mapIndexed { i, apk ->
                     val out = File(outDir, "$i-unsigned.apk")
-                    val extras = if (i == 0) Patcher.BaseExtras(overlayDex, options.toJson(), icon, options.removedPermissions()) else null
+                    val extras = if (i == 0) Patcher.BaseExtras(overlayDex, options.toJson(runtimeId), icon, options.removedPermissions()) else null
                     val result = Patcher(runtime, stub).patch(apk, out, extras) { raw("patch: $it") }
                     libCount += result.libs.size
                     if (result.newTargetSdk != null) target = result.oldTargetSdk to result.newTargetSdk
@@ -159,7 +219,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) { signed.forEach { it.delete() } }
             when (outcome) {
                 is Installer.Outcome.Success -> {
-                    step("Installed ${info.label}")
+                    step(if (analyzed.update) "Updated ${info.label}" else "Installed ${info.label}")
+                    refreshLibrary()
                     afterInstall(info, analyzed.bundle)
                 }
                 is Installer.Outcome.Failure -> {
@@ -260,7 +321,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = State.Ready(s.info, "No data file added: the app may not start without it")
     }
 
-    private fun fail(e: Exception) {
+    private fun fail(e: Throwable) {
         android.util.Log.e("THUMB", "failed", e)
         raw("ERROR ${describe(e)}")
         raw(android.util.Log.getStackTraceString(e))

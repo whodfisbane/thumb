@@ -15,6 +15,11 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
     data class Result(val libs: List<String>, val oldTargetSdk: Int?, val newTargetSdk: Int?)
 
     companion object {
+        fun isSignatureFile(name: String): Boolean {
+            val upper = name.uppercase()
+            return listOf(".SF", ".RSA", ".DSA", ".EC", ".MF").any { upper.endsWith(it) }
+        }
+
         /** Android 14+ blocks installs below 23; 24 is the floor on newer releases. */
         const val MIN_TARGET_SDK = 24
     }
@@ -105,10 +110,5 @@ class Patcher(private val runtime: ByteArray, private val stub: ByteArray) {
         }
         log("patched ${input.name} in ${(System.nanoTime() - started) / 1_000_000} ms -> ${output.length() / 1024} KB")
         return Result(libs, targetOld, targetNew)
-    }
-
-    private fun isSignatureFile(name: String): Boolean {
-        val upper = name.uppercase()
-        return listOf(".SF", ".RSA", ".DSA", ".EC", ".MF").any { upper.endsWith(it) }
     }
 }

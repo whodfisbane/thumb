@@ -25,12 +25,16 @@ data class PatchOptions(
     /** The in-game menu, with every mod (each starts neutral: the app's own behaviour). */
     val overlay: Boolean = true,
 ) {
-    fun toJson(): String = org.json.JSONObject().apply {
+    /** [runtime]: id of the THUMB runtime the app is patched with (Library shows updates). */
+    fun toJson(runtime: String? = null): String = org.json.JSONObject().apply {
         put("version", 1)
+        runtime?.let { put("runtime", it) }
         put("adblock", adblock)
         put("fps_mode", fpsMode)
         put("legacy_fs", legacyFs)
         put("overlay", overlay)
+        put("sandbox", sandbox)
+        put("block_internet", blockInternet)
         // The menu always has every mod; "mods" stays so the runtime format can grow per-mod switches again.
         put("mods", org.json.JSONObject().apply {
             for (m in listOf("fps_counter", "speed", "fps_unlock", "adblock", "keep_screen_on")) put(m, overlay)
@@ -44,6 +48,16 @@ data class PatchOptions(
     }
 
     companion object {
+        /** The options an installed app was patched with (for re-patching). */
+        fun fromJson(json: org.json.JSONObject) = PatchOptions(
+            adblock = json.optBoolean("adblock", true),
+            fpsMode = json.optString("fps_mode", "compat").let { if (it == "default") it else "compat" },
+            legacyFs = json.optBoolean("legacy_fs", true),
+            sandbox = json.optBoolean("sandbox", false),
+            blockInternet = json.optBoolean("block_internet", false),
+            overlay = json.optBoolean("overlay", true),
+        )
+
         val SENSITIVE_PERMISSIONS = setOf(
             "android.permission.READ_CONTACTS", "android.permission.WRITE_CONTACTS", "android.permission.GET_ACCOUNTS",
             "android.permission.READ_PROFILE", "android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION",
