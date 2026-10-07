@@ -144,6 +144,35 @@ void t_deflateInit2(GuestThread& t) {
     set_ret32(t, uint32_t(r));
 }
 
+// int deflateInit_(strm, level, version, stream_size)
+void t_deflateInit(GuestThread& t) {
+    gaddr g = t.regs()[0];
+    z_stream* s = shadow(g, true);
+    *s = z_stream{};
+    sync_in(g, s);
+    int r = deflateInit(s, int32_t(t.regs()[1]));
+    if (r != Z_OK) drop(g);
+    else sync_out(g, s);
+    set_ret32(t, uint32_t(r));
+}
+
+// uLong deflateBound(z_streamp, uLong sourceLen)
+void t_deflateBound(GuestThread& t) {
+    z_stream* s = shadow(t.regs()[0], false);
+    set_ret32(t, uint32_t(::deflateBound(s, t.regs()[1])));
+}
+
+// const z_crc_t* get_crc_table(void): a guest copy of zlib's table.
+void t_get_crc_table(GuestThread& t) {
+    static gaddr table = [] {
+        gaddr g = mem().alloc_static(256 * 4, 4);
+        const z_crc_t* host = ::get_crc_table();
+        for (int i = 0; i < 256; i++) mem().write<uint32_t>(g + i * 4, uint32_t(host[i]));
+        return g;
+    }();
+    set_ret32(t, table);
+}
+
 // int inflateInit2_(strm, windowBits, version, stream_size)
 void t_inflateInit2(GuestThread& t) {
     gaddr g = t.regs()[0];
@@ -190,6 +219,11 @@ void register_zlib() {
     add("deflateEnd", t_stream_end<::deflateEnd>);
     add("inflateInit2_", t_inflateInit2);
     add("inflateInit_", t_inflateInit);
+    add("deflateInit_", t_deflateInit);
+    add("deflateBound", t_deflateBound);
+    add("get_crc_table", t_get_crc_table);
+    add("inflateSync", t_stream_reset<::inflateSync>);
+    add("zlibCompileFlags", +[](GuestThread& t) { set_ret32(t, uint32_t(::zlibCompileFlags())); });
     add("inflate", t_stream_op<::inflate>);
     add("inflateEnd", t_stream_end<::inflateEnd>);
     add("deflateReset", t_stream_reset<::deflateReset>);

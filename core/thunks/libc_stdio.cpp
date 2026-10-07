@@ -417,6 +417,35 @@ void t_stat(GuestThread& t) {
     set_ret32(t, uint32_t(r));
 }
 
+// int fstatat(int dirfd, const char* path, struct stat*, int flags)
+void t_fstatat(GuestThread& t) {
+    std::string p = map_path(mem().str(t.regs()[1]));
+    struct stat s;
+    errno = 0;
+    int r = ::fstatat(int32_t(t.regs()[0]), p.c_str(), &s, int32_t(t.regs()[3]));
+    sync_guest_errno(t);
+    if (r == 0) write_stat(t.regs()[2], s);
+    set_ret32(t, uint32_t(r));
+}
+
+// FILE* popen(const char* cmd, const char* mode) / int pclose(FILE*)
+void t_popen(GuestThread& t) {
+    errno = 0;
+    FILE* f = ::popen(mem().str(t.regs()[0]), mem().str(t.regs()[1]));
+    sync_guest_errno(t);
+    set_ret32(t, f ? guest_file_wrap(f) : 0);
+}
+void t_pclose(GuestThread& t) {
+    gaddr g = t.regs()[0];
+    FILE* f = host_file(g);
+    if (!f) return set_ret32(t, uint32_t(-1));
+    errno = 0;
+    int r = ::pclose(f);
+    guest_file_forget(g);
+    sync_guest_errno(t);
+    set_ret32(t, uint32_t(r));
+}
+
 void t_fstat(GuestThread& t) {
     struct stat s;
     errno = 0;
@@ -588,6 +617,46 @@ void t_readdir(GuestThread& t) {
     set_ret32(t, g);
 }
 
+// Registers a host DIR* as a guest DIR*.
+gaddr wrap_dir(GuestDir* gd) {
+    gaddr g = mem().calloc(1, kDirentSize);
+    std::lock_guard lk(g_dirs_mutex);
+    g_dirs[g] = gd;
+    return g;
+}
+
+// DIR* fdopendir(int fd)
+void t_fdopendir(GuestThread& t) {
+    errno = 0;
+    DIR* d = ::fdopendir(int32_t(t.regs()[0]));
+    sync_guest_errno(t);
+    if (!d) return set_ret32(t, 0);
+    auto* gd = new GuestDir();
+    gd->host = d;
+    set_ret32(t, wrap_dir(gd));
+}
+
+// int dirfd(DIR*): virtual listings have no descriptor.
+void t_dirfd(GuestThread& t) {
+    GuestDir* gd = guest_dir(t.regs()[0]);
+    if (!gd || !gd->host) {
+        mem().write<int32_t>(t.errno_addr(), gd ? ENOTSUP : EINVAL);
+        return set_ret32(t, uint32_t(-1));
+    }
+    set_ret32(t, uint32_t(::dirfd(gd->host)));
+}
+
+// int readdir_r(DIR*, struct dirent* entry, struct dirent** result)
+void t_readdir_r(GuestThread& t) {
+    gaddr d = t.regs()[0], entry = t.regs()[1], result = t.regs()[2];
+    t_readdir(t);  // fills the DIR's own dirent, returns it in r0
+    gaddr e = t.regs()[0];
+    if (e) std::memcpy(mem().ptr<void>(entry), mem().ptr<void>(e), kDirentSize);
+    (void)d;
+    if (result) mem().write<uint32_t>(result, e ? entry : 0);
+    set_ret32(t, 0);
+}
+
 void t_rewinddir(GuestThread& t) {
     GuestDir* gd = guest_dir(t.regs()[0]);
     if (!gd) return;
@@ -684,6 +753,16 @@ void register_libc_stdio() {
     add("lseek", H32_WRAP(h_lseek, int(int, long, int)));
     add("fcntl", t_fcntl);
 
+    add("fstatat", t_fstatat);
+    add("popen", t_popen);
+    add("pclose", t_pclose);
+    H32_ADD(flockfile, void(FILE*));
+    H32_ADD(funlockfile, void(FILE*));
+    add("putc_unlocked", H32_WRAP(::fputc, int(int, FILE*)));
+    add("getmntent", +[](GuestThread& t) { set_ret32(t, 0); });  // no mount table for apps
+    add("fdopendir", t_fdopendir);
+    add("dirfd", t_dirfd);
+    add("readdir_r", t_readdir_r);
     add("opendir", t_opendir);
     add("readdir", t_readdir);
     add("rewinddir", t_rewinddir);

@@ -393,11 +393,85 @@ void t_sem_getvalue(GuestThread& t) {
     set_ret32(t, 0);
 }
 
+// ---- read-write locks: one host pthread_rwlock per guest lock (tracks reader/writer itself) ----
+
+std::mutex g_rwlock_table_lock;
+std::unordered_map<gaddr, pthread_rwlock_t*> g_rwlocks;
+
+pthread_rwlock_t* host_rwlock(gaddr g) {
+    std::lock_guard lk(g_rwlock_table_lock);
+    auto& l = g_rwlocks[g];
+    if (!l) {
+        l = new pthread_rwlock_t;
+        pthread_rwlock_init(l, nullptr);
+    }
+    return l;
+}
+
+void t_rwlock_init(GuestThread& t) {
+    host_rwlock(t.regs()[0]);
+    set_ret32(t, 0);
+}
+void t_rwlock_destroy(GuestThread& t) {
+    std::lock_guard lk(g_rwlock_table_lock);
+    auto it = g_rwlocks.find(t.regs()[0]);
+    if (it != g_rwlocks.end()) {
+        pthread_rwlock_destroy(it->second);
+        delete it->second;
+        g_rwlocks.erase(it);
+    }
+    set_ret32(t, 0);
+}
+template <int (*Fn)(pthread_rwlock_t*)>
+void t_rwlock_op(GuestThread& t) { set_ret32(t, uint32_t(Fn(host_rwlock(t.regs()[0])))); }
+
+// ---- cleanup handlers (pthread_cleanup_push/pop macros) ----
+// Guest __pthread_cleanup_t: prev(4) routine(4) arg(4), on the guest stack.
+
+thread_local gaddr t_cleanup_stack = 0;
+
+// void __pthread_cleanup_push(__pthread_cleanup_t* c, void (*routine)(void*), void* arg)
+void t_cleanup_push(GuestThread& t) {
+    gaddr c = t.regs()[0];
+    mem().write<uint32_t>(c, t_cleanup_stack);
+    mem().write<uint32_t>(c + 4, t.regs()[1]);
+    mem().write<uint32_t>(c + 8, t.regs()[2]);
+    t_cleanup_stack = c;
+}
+
+// void __pthread_cleanup_pop(__pthread_cleanup_t* c, int execute)
+void t_cleanup_pop(GuestThread& t) {
+    gaddr c = t.regs()[0];
+    bool execute = t.regs()[1] != 0;
+    t_cleanup_stack = mem().read<uint32_t>(c);
+    if (execute) {
+        gaddr routine = mem().read<uint32_t>(c + 4);
+        if (routine) t.call(routine, GuestArgs().u32(mem().read<uint32_t>(c + 8)));
+    }
+}
+
+// int pthread_getschedparam(pthread_t, int* policy, struct sched_param*): normal scheduling.
+void t_getschedparam(GuestThread& t) {
+    if (gaddr p = t.regs()[1]) mem().write<int32_t>(p, SCHED_OTHER);
+    if (gaddr s = t.regs()[2]) mem().write<int32_t>(s, 0);
+    set_ret32(t, 0);
+}
+
 }  // namespace
 
 namespace thunks {
 
 void register_libc_pthread() {
+    add("pthread_rwlock_init", t_rwlock_init);
+    add("pthread_rwlock_destroy", t_rwlock_destroy);
+    add("pthread_rwlock_rdlock", t_rwlock_op<pthread_rwlock_rdlock>);
+    add("pthread_rwlock_wrlock", t_rwlock_op<pthread_rwlock_wrlock>);
+    add("pthread_rwlock_tryrdlock", t_rwlock_op<pthread_rwlock_tryrdlock>);
+    add("pthread_rwlock_trywrlock", t_rwlock_op<pthread_rwlock_trywrlock>);
+    add("pthread_rwlock_unlock", t_rwlock_op<pthread_rwlock_unlock>);
+    add("__pthread_cleanup_push", t_cleanup_push);
+    add("__pthread_cleanup_pop", t_cleanup_pop);
+    add("pthread_getschedparam", t_getschedparam);
     add("pthread_mutex_init", t_mutex_init);
     add("pthread_mutex_destroy", t_mutex_destroy);
     add("pthread_mutex_lock", t_mutex_lock);

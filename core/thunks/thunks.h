@@ -51,6 +51,8 @@ void register_libc_math();
 void register_libc_time();
 void register_libc_pthread();
 void register_libc_misc();
+void register_libc_net();  // after misc
+void register_libc_extra();
 void register_zlib();
 void register_android();
 void register_gles1();

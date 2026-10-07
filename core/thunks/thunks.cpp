@@ -172,6 +172,8 @@ void register_all() {
         register_libc_time();
         register_libc_pthread();
         register_libc_misc();
+        register_libc_net();
+        register_libc_extra();
         register_zlib();
         register_android();
         register_gles1();
