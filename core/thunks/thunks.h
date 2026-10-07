@@ -54,6 +54,9 @@ void register_libc_misc();
 void register_zlib();
 void register_android();
 void register_gles1();
+void register_gles2();  // after gles1: shares and overrides some functions
+void register_egl();
+void register_native_window();
 void register_dl();
 
 }  // namespace thunks

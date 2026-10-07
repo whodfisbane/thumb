@@ -183,7 +183,7 @@ void register_gles1() {
     real_clear = t_gl_noop;
 #endif
     add("glClear", +[](GuestThread& t) {
-        if (t.regs()[0] & 0x4000 /* GL_COLOR_BUFFER_BIT */) timescale::frame();
+        if ((t.regs()[0] & 0x4000 /* GL_COLOR_BUFFER_BIT */) && !timescale::guest_swaps()) timescale::frame();
         real_clear(t);
     });
 }

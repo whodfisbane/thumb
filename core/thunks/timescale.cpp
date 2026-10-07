@@ -72,6 +72,10 @@ int64_t real_sleep_ns(int64_t guest_ns) {
 }
 
 std::atomic<int64_t> g_frame_interval_ns{0};
+std::atomic<bool> g_guest_swaps{false};
+
+void note_guest_swap() { g_guest_swaps.store(true, std::memory_order_relaxed); }
+bool guest_swaps() { return g_guest_swaps.load(std::memory_order_relaxed); }
 
 void set_fps_limit(int fps) {
     g_frame_interval_ns = fps > 0 ? 1000000000LL / fps : 0;

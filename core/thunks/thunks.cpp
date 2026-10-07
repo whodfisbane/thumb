@@ -175,6 +175,9 @@ void register_all() {
         register_zlib();
         register_android();
         register_gles1();
+        register_gles2();
+        register_egl();
+        register_native_window();
         register_dl();
     });
 }

@@ -20,6 +20,10 @@ int64_t real_sleep_ns(int64_t guest_ns);
 // (e.g. on glClear with the color buffer); fps() returns the recent rate.
 // With a limit set, frame() also waits so frames are at least 1/limit apart.
 void frame();
+// Apps that swap buffers themselves (guest eglSwapBuffers) are counted there;
+// otherwise a color-buffer glClear marks a frame (Java-side GLSurfaceView apps).
+void note_guest_swap();
+bool guest_swaps();
 double fps();
 void set_fps_limit(int fps);  // 0 = unlimited
 
