@@ -28,7 +28,7 @@ OpenSL ES audio and Mono-based Unity games.
 
 ## Next: correctness bugs (before anything else)
 
-- [ ] **JNI handle table never frees entries.** Every local reference Java hands out gets a new
+- [x] **JNI handle table never frees entries.** (fixed: counted handles, freed per native call and on Delete*Ref; Worms stays at 3 live handles) Every local reference Java hands out gets a new
       handle, so a game creating strings every frame grows memory without limit (and wraps after
       ~67M handles). Free handles on `DeleteLocalRef`/`DeleteGlobalRef` and when a native call returns
 - [ ] **`pthread_once` holds one global lock** while running the init function: an init that waits on

@@ -121,9 +121,9 @@ static void boot_worms3(int frames) {
     for (int i = 0; i < frames; i++) {
         keyboard(env, renderer);
         render(env, renderer);
-        if ((i + 1) % 60 == 0) H32_INFO("boot: rendered %d frames", i + 1);
+        if ((i + 1) % 60 == 0) H32_INFO("boot: rendered %d frames (%zu live JNI handles)", i + 1, jni::live_refs());
     }
-    H32_INFO("boot: done, %d frames", frames);
+    H32_INFO("boot: done, %d frames, %zu live JNI handles", frames, jni::live_refs());
 }
 
 int main(int argc, char** argv) {

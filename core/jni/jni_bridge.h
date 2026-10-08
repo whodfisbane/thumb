@@ -37,6 +37,8 @@ private:
 
 // Calls a guest JNI_OnLoad(JavaVM*, void*) and returns its result.
 jint call_JNI_OnLoad(gaddr fn, JNIEnv* env);
+// Object handles currently held by the guest (bounded now that they're freed).
+size_t live_refs();
 
 // Registers exported "Java_<class>_<method>" functions (the pre-RegisterNatives
 // way of binding natives) with the JVM; signatures come from reflection.

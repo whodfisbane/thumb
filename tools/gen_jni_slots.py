@@ -20,7 +20,8 @@ body = re.search(r"struct JNINativeInterface \{(.*?)\n\};", src, re.S).group(1)
 body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
 MANUAL = re.compile(r"^(GetMethodID|GetStaticMethodID|GetStringU?T?F?Chars|ReleaseStringU?T?F?Chars|"
                     r"GetStringCritical|ReleaseStringCritical|Get\w+ArrayElements|Release\w+ArrayElements|"
-                    r"GetPrimitiveArrayCritical|ReleasePrimitiveArrayCritical|RegisterNatives|GetJavaVM)$")
+                    r"GetPrimitiveArrayCritical|ReleasePrimitiveArrayCritical|RegisterNatives|GetJavaVM|"
+                    r"NewGlobalRef|NewWeakGlobalRef|DeleteLocalRef|DeleteGlobalRef|DeleteWeakGlobalRef)$")
 NONE = re.compile(r"^(reserved\d+|DefineClass)$")
 CALL = re.compile(r"^(CallNonvirtual|CallStatic|Call)(Object|Boolean|Byte|Char|Short|Int|Long|Float|Double|Void)Method([VA]?)$")
 RET = dict(Object="L", Boolean="Z", Byte="B", Char="C", Short="S", Int="I", Long="J", Float="F", Double="D", Void="V")

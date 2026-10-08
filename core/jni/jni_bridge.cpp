@@ -27,24 +27,61 @@ namespace {
 
 // ------------------------------------------------------------ handles ----
 
+// Guest handles for host JNI references (and method/field IDs). Each entry
+// counts the references the guest holds through it, local and global apart:
+// to_guest() takes one, release() drops one, and a free entry is reused. Two
+// threads can hold the same local-reference value at once, and some VMs return
+// a global reference equal to the local one, hence counts instead of owners.
 class HandleTable {
 public:
-    uint32_t to_guest(void* p) {
+    uint32_t to_guest(void* p, bool global = false) {
         if (!p) return 0;
         std::lock_guard lk(m_);
-        auto [it, inserted] = index_.try_emplace(p, uint32_t(values_.size()));
-        if (inserted) values_.push_back(p);
-        return encode(it->second);
+        uint32_t i;
+        if (auto it = index_.find(p); it != index_.end()) {
+            i = it->second;
+        } else {
+            if (!free_.empty()) {
+                i = free_.back();
+                free_.pop_back();
+                values_[i] = p;
+                counts_[i] = {0, 0};
+            } else {
+                i = uint32_t(values_.size());
+                values_.push_back(p);
+                counts_.push_back({0, 0});
+            }
+            index_.emplace(p, i);
+        }
+        (global ? counts_[i].global : counts_[i].local)++;
+        return encode(i);
     }
     void* to_host(uint32_t h) {
         if (!h) return nullptr;
         uint32_t i = decode(h);
         std::lock_guard lk(m_);
-        if (i >= values_.size()) {
-            H32_ERROR("jni: invalid guest handle 0x%08x", h);
+        if (i >= values_.size() || !values_[i]) {
+            H32_ERROR("jni: invalid or released guest handle 0x%08x", h);
             return nullptr;
         }
         return values_[i];
+    }
+    void release(uint32_t h, bool global = false) {
+        if (!h) return;
+        uint32_t i = decode(h);
+        std::lock_guard lk(m_);
+        if (i >= values_.size() || !values_[i]) return;
+        uint32_t& n = global ? counts_[i].global : counts_[i].local;
+        if (n == 0) return;
+        if (--n == 0 && counts_[i].local == 0 && counts_[i].global == 0) {
+            index_.erase(values_[i]);
+            values_[i] = nullptr;
+            free_.push_back(i);
+        }
+    }
+    size_t live() {
+        std::lock_guard lk(m_);
+        return index_.size();
     }
 
 private:
@@ -54,6 +91,11 @@ private:
     static uint32_t decode(uint32_t h) { return (h - 0xF0000000u) / 4; }
     std::mutex m_;
     std::vector<void*> values_{nullptr};
+    struct Counts {
+        uint32_t local, global;
+    };
+    std::vector<Counts> counts_{{0, 0}};
+    std::vector<uint32_t> free_;
     std::unordered_map<void*, uint32_t> index_;
 };
 
@@ -124,10 +166,32 @@ JavaVM* g_host_vm = nullptr;
 gaddr g_guest_vm = 0, g_guest_env = 0;
 thread_local JNIEnv* t_env = nullptr;
 
+// Local references created while Java -> guest native call is running: JNI
+// frees them when the call returns, so their handles are released then too.
+// Threads the guest created itself have no frame; their locals are released
+// by DeleteLocalRef (as in JNI, they'd otherwise live until detach).
+thread_local std::vector<uint32_t>* t_frame = nullptr;
+// Set while converting a new global/weak global reference (not frame-owned).
+thread_local bool t_global_ref = false;
+
+struct LocalFrame {
+    std::vector<uint32_t> refs;
+    std::vector<uint32_t>* prev;
+    LocalFrame() : prev(t_frame) { t_frame = &refs; }
+    ~LocalFrame() {
+        t_frame = prev;
+        for (uint32_t h : refs) g_refs.release(h);
+    }
+};
+
 }  // namespace
 
 void* ref_to_host(uint32_t h) { return g_refs.to_host(h); }
-uint32_t ref_to_guest(void* r) { return g_refs.to_guest(r); }
+uint32_t ref_to_guest(void* r) {
+    uint32_t h = g_refs.to_guest(r, t_global_ref);
+    if (h && t_frame && !t_global_ref) t_frame->push_back(h);
+    return h;
+}
 void* id_to_host(uint32_t h) { return g_ids.to_host(h); }
 uint32_t id_to_guest(void* id) { return g_ids.to_guest(id); }
 uint32_t guest_env() { return g_guest_env; }
@@ -516,6 +580,35 @@ void sync_pinned_to_guest(JNIEnv* env) {
 
 namespace {
 
+// ---- reference lifetime (see LocalFrame) ----
+
+template <jobject (JNIEnv::*Fn)(jobject)>
+void t_new_global(GuestThread& t) {
+    jobject r = (host_env()->*Fn)(static_cast<jobject>(ref_to_host(t.regs()[1])));
+    t_global_ref = true;
+    set_ret32(t, ref_to_guest(r));
+    t_global_ref = false;
+}
+
+template <void (JNIEnv::*Fn)(jobject), bool Global>
+void t_delete_ref(GuestThread& t) {
+    uint32_t h = t.regs()[1];
+    jobject r = static_cast<jobject>(ref_to_host(h));
+    if (!r) return;
+    (host_env()->*Fn)(r);
+    if (Global) return g_refs.release(h, true);
+    // A frame-owned local: drop it from the frame so it isn't released twice.
+    if (t_frame) {
+        for (auto it = t_frame->rbegin(); it != t_frame->rend(); ++it) {
+            if (*it == h) {
+                t_frame->erase(std::next(it).base());
+                break;
+            }
+        }
+    }
+    g_refs.release(h);
+}
+
 void t_get_java_vm(GuestThread& t) {
     if (gaddr out = t.regs()[1]) mem().write<uint32_t>(out, g_guest_vm);
     set_ret32(t, JNI_OK);
@@ -554,6 +647,7 @@ void native_trampoline(ffi_cif*, void* ret, void** args, void* user) {
     auto* nm = static_cast<NativeMethod*>(user);
     JNIEnv* env = *static_cast<JNIEnv**>(args[0]);
     EnvScope scope(env);
+    LocalFrame frame;  // after EnvScope: released before the env is restored
     GuestArgs ga;
     ga.u32(g_guest_env);
     ga.u32(ref_to_guest(*static_cast<jobject*>(args[1])));
@@ -758,6 +852,11 @@ ThunkFn manual_handler(std::string_view name) {
     if (name == "ReleasePrimitiveArrayCritical") return t_release_elements;
     if (name == "RegisterNatives") return t_register_natives;
     if (name == "GetJavaVM") return t_get_java_vm;
+    if (name == "NewGlobalRef") return t_new_global<&JNIEnv::NewGlobalRef>;
+    if (name == "NewWeakGlobalRef") return t_new_global<&JNIEnv::NewWeakGlobalRef>;
+    if (name == "DeleteLocalRef") return t_delete_ref<&JNIEnv::DeleteLocalRef, false>;
+    if (name == "DeleteGlobalRef") return t_delete_ref<&JNIEnv::DeleteGlobalRef, true>;
+    if (name == "DeleteWeakGlobalRef") return t_delete_ref<&JNIEnv::DeleteWeakGlobalRef, true>;
 #define H32_ARRAY_CASE(Name, T, K)                                       \
     if (name == "Get" #Name "ArrayElements") return t_get_elements<K>; \
     if (name == "Release" #Name "ArrayElements") return t_release_elements;
@@ -847,8 +946,11 @@ int register_java_exports(JNIEnv* env, const std::vector<std::pair<std::string, 
     return registered;
 }
 
+size_t live_refs() { return g_refs.live(); }
+
 jint call_JNI_OnLoad(gaddr fn, JNIEnv* env) {
     EnvScope scope(env);
+    LocalFrame frame;
     GuestArgs a;
     a.u32(g_guest_vm).u32(0);
     jint v = jint(GuestThread::current().call(fn, a).r0);
