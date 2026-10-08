@@ -19,6 +19,8 @@ OpenSL ES audio and Mono-based Unity games.
   status (reported by the app), uninstall
 - **Per-app options** (stored as `assets/thumb/options.json`): ad blocking, FPS (Compat 60 / Default),
   sandbox (remove sensitive permissions, optionally internet), custom app name
+- **Per-game fixes** (Proton-style, offered only for their app): Worms 3 "Lower audio delay"
+  (its sound queue went from ~1.4 s to 0.16 s)
 - **In-game menu:** floating button (three-finger double tap hides it), FPS counter, speed slider,
   FPS unlock slider, ad-block toggle, keep screen on, force restart / kill
 - **Translator:** dynarmic JIT, ELF loader, ~650 thunks: libc, pthreads, zlib, JNI bridge,
