@@ -734,7 +734,8 @@ private fun AboutDialog(onToggleHolo: () -> Unit, onClose: () -> Unit) {
                 Text("THUMB Helps Unsupported Mobile Binaries: runs old 32-bit Android apps and games on 64-bit-only phones.", color = Color.White, fontSize = 14.sp)
                 Text(rich("**Free software** under the **GNU GPL v3.0**. You can use, study, share and change it."), color = Muted, fontSize = 13.sp)
                 Text("Built with Claude Opus 5.5 (Anthropic) as a pair programmer.", color = Muted, fontSize = 13.sp)
-                Text("Source code: GitHub (link coming soon)", color = Muted, fontSize = 13.sp)
+                Text("Source code: github.com/whodfisbane/thumb", color = accent(), fontSize = 13.sp,
+                    modifier = Modifier.clickable { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/whodfisbane/thumb"))) })
                 Text("Includes: dynarmic (0BSD), TLSF (BSD), libffi (MIT), apksig and jni.h (Apache-2.0), AndroidX/Compose (Apache-2.0).", color = Muted, fontSize = 12.sp)
                 Text(rich("THUMB contains no code or data from any app or game. **Patch only apps you own** and **never share patched APKs**."), color = Muted, fontSize = 12.sp)
             }
