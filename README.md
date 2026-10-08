@@ -23,7 +23,7 @@ heavy. THUMB translates just the native part and lets everything else run as a n
 
 ## Status
 
-**Worms 3 and ScummVM are playable on a Pixel 9a (GrapheneOS, Android 17)**: graphics, audio, touch. 🎉
+**Worms 3, ScummVM and VLC run on a Pixel 9a (GrapheneOS, Android 17)**: graphics, audio, touch, hardware video decoding. 🎉
 Tested on: Pixel 9a, GrapheneOS, Android 17 (API 37), arm64-only.
 
 ### Compatibility
@@ -33,7 +33,7 @@ Tested on: Pixel 9a, GrapheneOS, Android 17 (API 37), arm64-only.
 | Worms 3 | 2.1 | ✅ Playable | GLES1, Java audio, self-unpacking `libgvradio` |
 | ScummVM (SDL build) | 1.8.1 | ✅ Playable | 7 libraries, SDL 1.2, old-NDK stdio macros. Tested: Lure of the Temptress, with sound. Launcher menus need repeated taps (under investigation) |
 | ScummVM (native build) | 1.8.1 | ✅ Playable | Needed two compat shims: virtual `/` listing, positioned asset descriptors. Tested: Lure of the Temptress |
-| VLC | 2.0.6 | ❌ Not yet | Doctor: 66% (needs GLES2/EGL, more libc, sockets) |
+| VLC | 2.0.6 | ✅ Plays video | Hardware decoding through AMediaCodec, futex, sockets, pthread cleanup handlers. Its optional `libiomx`/`libanw` plugins need private Android libraries and are skipped (VLC falls back by itself) |
 
 | Milestone | State |
 |---|---|

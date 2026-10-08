@@ -1,118 +1,101 @@
 # THUMB roadmap
 
-Where we are (2026-10-06): the translator runs **Worms 3 fully playable on a Pixel 9a**
-(GrapheneOS, Android 17): graphics, audio, touch, 60 fps. Installing still needs a PC
-(`tools/repack.py` + adb).
+Where we are (2026-10-08): **4 apps run on a Pixel 9a** (GrapheneOS, Android 17, arm64-only), patched
+and installed **on the phone itself**: Worms 3 (fully playable), ScummVM SDL and native builds
+(playable), and VLC 2.0.6 (plays video with hardware decoding). Covered APIs: libc/libm/pthreads,
+zlib, JNI, OpenGL ES 1 + 2, EGL, native windows, AMediaCodec, sockets, guest `dlopen`. Biggest gaps:
+OpenSL ES audio and Mono-based Unity games.
 
-## Phase 0: Release-ready open source
+## Done
 
-- [x] License: GPL-3.0 (`LICENSE`), third-party notices (`THIRD_PARTY_NOTICES.md`)
-- [x] README credits: "built with Claude Opus 5.5", plus a note on AI-assisted code
-- [x] OBB dev-fetch is compiled in only with `tools/build-android.sh --dev` (off by default)
-- [x] Tests: `tools/run-tests.sh` builds ARM32 test libraries (tests/guest) with the NDK and runs
-      them through the harness: libc, printf/scanf, qsort/bsearch, setjmp, C++ exceptions, threads,
-      semaphores, files/stat/dirent, soft-float ABI, dlopen, raw syscalls, /proc/self/maps (63 checks)
-- [ ] Tests for JNI (needs the fake JVM to drive natives from the test)
-- [ ] GitHub Actions: build the harness and run the tests, build `libthumb.so`, build the THUMB app
-- [ ] Release signing key (kept private) and reproducible release builds
+- **Release basics:** GPL-3.0, third-party notices, README credits, dev-only features behind
+  `--dev`, signed release builds, GitHub Actions CI (translator + guest tests + app)
+- **Tests:** `tools/run-tests.sh` runs ARM32 test libraries through the harness (libc, printf/scanf,
+  setjmp, C++ exceptions, threads incl. cleanup handlers, files, soft-float ABI, dlopen, syscalls)
+- **THUMB app (no PC needed):** import `.apk`/`.xapk`/`.apks`/`.apkm`, THUMB Doctor with a clear
+  verdict, on-phone patching (targetSdk raised, 16 KB-aligned libs, split APKs), signing, install,
+  automatic OBB search and delivery, console
+- **Library ("Patched"):** open, update/re-patch from the installed copy, change options, data file
+  status (reported by the app), uninstall
+- **Per-app options** (stored as `assets/thumb/options.json`): ad blocking, FPS (Compat 60 / Default),
+  sandbox (remove sensitive permissions, optionally internet), custom app name
+- **In-game menu:** floating button (three-finger double tap hides it), FPS counter, speed slider,
+  FPS unlock slider, ad-block toggle, keep screen on, force restart / kill
+- **Translator:** dynarmic JIT, ELF loader, ~650 thunks: libc, pthreads, zlib, JNI bridge,
+  GLES 1 + 2, EGL, ANativeWindow, AMediaCodec (hardware decoding), sockets, raw syscalls (futex),
+  self-unpacking libraries, guest `dlopen`/`dlsym`, legacy compat shims (virtual `/`, positioned asset
+  fds), code cache invalidation on `mprotect`/`cacheflush`
 
-## Phase 1: THUMB app (no PC needed): ✅ verified on device with Worms 3 (2026-10-06)
+## Next: correctness bugs (before anything else)
 
-- [x] Kotlin + Jetpack Compose app, arm64, minimum Android 10
-- [x] Import an app: pick an `.apk`, or a bundle (`.xapk` / `.apks` / `.apkm`)
+- [ ] **JNI handle table never frees entries.** Every local reference Java hands out gets a new
+      handle, so a game creating strings every frame grows memory without limit (and wraps after
+      ~67M handles). Free handles on `DeleteLocalRef`/`DeleteGlobalRef` and when a native call returns
+- [ ] **`pthread_once` holds one global lock** while running the init function: an init that waits on
+      another thread which hits a different `pthread_once` deadlocks (common in C++ static init).
+      Use a per-`once_control` state with a condition variable
+- [ ] Mutexes are always recursive: `pthread_mutex_trylock` by the owner returns 0 instead of `EBUSY`
+      for normal/errorcheck mutexes. Track the mutex type
+- [ ] **Signing key can't be backed up.** It lives in AndroidKeyStore, so reinstalling THUMB, a factory
+      reset or a new phone loses it, and patched apps can then only be updated by uninstalling them
+      (which wipes their saves). Options: an exportable key generated in software and backed up
+      encrypted, and/or save export/import before re-patching (see Sandbox: save virtualisation)
+
+## Phase 3: Compatibility
+
+- [ ] **OpenSL ES** (audio): a large share of 2011–2016 NDK games output sound through it. Top item
+- [ ] **Mono-based Unity games** (arm32-only apps are mostly pre-2019, i.e. the Mono era): the Mono
+      JIT writes ARM code into RWX memory without calling `mprotect` each time, so invalidating on
+      `mprotect` misses it. Needs write tracking on executable pages (write-protect translated pages,
+      invalidate on fault). The single biggest compatibility unlock
+- [ ] More system APIs: GLES 3, AAudio, OpenAL, libandroid input/assets (`AAsset*`, `AInputQueue`),
+      `ANativeActivity` (NativeActivity games)
+- [ ] Doctor: don't count libraries that need private Android system libraries (e.g. VLC's
+      `libiomx`/`libanw`); modern Android won't load them even natively, so apps already fall back
 - [ ] Choose an already-installed app as the source
-- [x] On-device patching: the same steps as `repack.py` (stubs + original libs + `libthumb.so`),
-      handling split APKs (`config.armeabi_v7a`), signed with a per-device THUMB key via apksig
-- [x] Install through `PackageInstaller` sessions (works for split APKs)
-- [x] OBB handling, automatic where possible:
-  - `.xapk` bundles often contain the OBB: imported automatically
-  - otherwise auto-search (chosen folder or full file access) or a file picker
-  - delivery: THUMB stores the OBB privately and grants the game read access; the runtime
-    copies it into the game's own OBB folder on first launch, then THUMB's copy is deleted
-- [ ] Library screen: patched apps, status, add OBB later, re-patch after THUMB updates, uninstall
-- [x] Console: full raw log with copy button (patching side)
-- [ ] Log viewer for the patched app's `thumb` runtime log
+- [ ] Community compatibility list (apps/games, status, notes)
+- [ ] Tests for JNI (needs the fake JVM to drive natives from the test)
 
-## Phase 2: Per-app options
+## Phase 3.5: Addons (niche and community)
 
-- [ ] Custom app name and icon for patched apps
-- [ ] FPS unlock (request 90/120 Hz), off by default; some games tie game speed to frame rate
-- [ ] Ad-method blocker toggle and custom block patterns
-- [ ] Log level, performance overlay (FPS, guest heap, JIT cache, translation time)
-- [ ] Options travel as `assets/thumb.json` inside the patched APK
+All **official API support ships inside THUMB**, so patched apps work fully offline. Addons are for:
 
-## Phase 2.5: In-game THUMB menu
+- [ ] Community content (data only, no native code): per-game patches, value-editor presets,
+      gamepad layouts, compatibility notes
+- [ ] Niche or very large optional components, official and signed (e.g. a Vulkan layer)
+- [ ] THUMB Doctor names the addon an app needs and offers to download it
 
-A floating button inside every patched app (no overlay permission needed: it lives in
-the app's own window). The repackager adds a small `classes-thumb.dex` for the UI.
+## Phase 4: In-game menu extras
 
-- [ ] Floating button + panel; **three-finger double tap** (two taps within ~400 ms) hides/unhides it,
-      so games played with three fingers don't trigger it. The gesture is configurable per app
-      (e.g. four-finger double tap, or off), and gestures THUMB consumes are not passed to the game
-- [ ] FPS counter
-- [ ] **FPS unlock** (90/120 Hz), shown with this warning on first enable:
-      > ⚠️ Many older games tie their game speed to the frame rate. Unlocking FPS may make
-      > the game run too fast, break physics or animations, or drain more battery.
-      > If the game speeds up, use the speed slider to bring it back to 1×.
-- [ ] **Speed slider** (slow-mo / fast-forward): THUMB scales the guest's clock
-      (`gettimeofday`, `clock_gettime`, `time`, ...)
-- [ ] Ad-block toggle (JNI method block list)
-- [ ] **Dev mode: value editor** (search a value, narrow down, edit or freeze), off by default,
-      shown with this warning every time it is turned on:
+- [ ] Configurable hide gesture (e.g. four-finger double tap, or off)
+- [ ] **Dev mode: value editor** (search a value, narrow down, edit or freeze), off by default, with
+      this warning every time it is turned on:
       > ⚠️ Dev mode edits the game's memory directly. Use it only in single-player/offline
       > games. Editing values can corrupt save files or crash the game, so back up your saves
       > first. In online games it may break the terms of service, get your account banned,
       > or spoil the game for other players.
 - [ ] Force texture filtering (via the GLES thunks)
 - [ ] Gamepad → touch mapping for touch-only games
-- [ ] Log / crash viewer
+- [ ] Log / crash viewer for the patched app's `thumb` log
+- [ ] Custom icon (badge) for patched apps
 
-## Phase 3: Compatibility
+## Phase 5: Performance and polish
 
-- [x] **THUMB Doctor** (`tools/thumb-doctor.py`): scan an APK and list imports THUMB doesn't implement yet
-- [ ] THUMB Doctor inside the THUMB app (Kotlin port; supported-function list generated at build time)
-- [ ] Community compatibility list (apps/games, status, notes)
-- [ ] More system APIs: GLES 2/3, EGL, OpenSL ES, AAudio, libandroid (assets, input, window),
-      guest `dlopen`/`dlsym` (multi-library and plugin-based engines)
-- [ ] Self-modifying code detection (Mono-based Unity games generate code at runtime)
-- [ ] Test a second game and a non-game app
-
-## Phase 3.5: Addons (niche and community)
-
-All **official API support ships inside THUMB** (each API family is only ~10-50 KB; the
-JIT is ~1.6 MB of the ~4 MB runtime), so patched apps work fully offline. Addons are for:
-
-- [ ] Community content (data only, no native code): per-game patches, value-editor presets,
-      gamepad layouts, compatibility notes
-- [ ] Niche or very large optional components, official and signed (e.g. a Vulkan layer)
-- [ ] THUMB Doctor names the addon an app needs and offers to download it
-- [ ] Code stays organized per API family so packs can be split out later if needed
+- [ ] Measure THUMB's own overhead (stats readout), tune JIT cache sizes per thread
+- [ ] Clean up per-thread state on thread exit
+- [ ] Crash reports with guest backtraces (symbolized like the harness does)
+- [ ] Reproducible release builds
 
 ## Ideas queue
 
-- [ ] **Sandbox mode** (per app, default on for games): strip unneeded permissions from the
-      manifest at patch time; in the translator, block or limit native networking, virtualize
-      file access (save backup/export, multiple save profiles), fake device identifiers
-- [ ] **LAN multiplayer**: real socket support (32-bit sockaddr/addrinfo/timeval/select
-      conversions), with a per-app network setting (none / LAN only / full)
-- [ ] Raise `targetSdkVersion` during patching (Android 14+ refuses installs below 23)
-- [ ] **Legacy Android compatibility shims** (per-app toggles, on by default):
-  - [x] virtual listing for folders modern Android hides (`/`, `/storage`, `/storage/emulated`)
-        when the real listing is denied, so old file browsers can reach `sdcard`
-  - [x] `AssetFileDescriptor.getFileDescriptor()` returns a descriptor positioned at the asset
-        (old Android behaviour; ScummVM's native port reads without seeking)
-  - [ ] map old storage paths (`/mnt/sdcard`, `/sdcard/<app>`) to places the app can use
-  - [ ] fake answers for removed system services/APIs as they show up
-
-## Phase 4: Performance and polish
-
-- [ ] Measure THUMB's own overhead (stats readout), tune JIT cache sizes per thread
-- [ ] Free JNI handle-table entries; clean up on thread exit
-- [ ] Crash reports with guest backtraces (symbolized like the harness does)
+- [ ] **Sandbox mode, part 2:** virtualize file access (save backup/export, multiple save profiles),
+      fake device identifiers, per-app network setting (none / LAN only / full)
+- [ ] **LAN multiplayer:** sockets now work; test with LAN-capable games
+- [ ] **Legacy Android compatibility shims** (more): map old storage paths (`/mnt/sdcard`,
+      `/sdcard/<app>`), fake answers for removed system services as they show up
 
 ## Known gaps
 
 - Linux harness: Worms 3's text rendering calls a Java method through a null method ID
   (fake-JVM fidelity issue; works on a real phone)
-- `pthread_once` holds a global lock while running the init function
-- Mutexes are always recursive
+- `pthread_exit` from a nested guest call unwinds only the innermost frame
