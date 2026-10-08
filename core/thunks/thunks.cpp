@@ -180,6 +180,7 @@ void register_all() {
         register_gles2();
         register_egl();
         register_native_window();
+        register_mediandk();
         register_dl();
     });
 }
