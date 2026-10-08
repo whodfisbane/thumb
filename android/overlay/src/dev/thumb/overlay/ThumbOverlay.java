@@ -96,6 +96,7 @@ public final class ThumbOverlay {
         modAdblock = mods.optBoolean("adblock");
         modScreenOn = mods.optBoolean("keep_screen_on");
         prefs = app.getSharedPreferences("thumb_overlay", 0);
+        GameFixes.start(app, options.optJSONArray("fixes"));
         icon = loadIcon();
 
         // Live changes from the menu override the patch-time defaults.

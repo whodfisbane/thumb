@@ -26,6 +26,8 @@ data class PatchOptions(
     // ---- THUMB overlay (in-game menu) and its mods ----
     /** The in-game menu, with every mod (each starts neutral: the app's own behaviour). */
     val overlay: Boolean = true,
+    /** Per-game fixes turned on (ids from [GameFixes]); null = this app's defaults. */
+    val fixes: Set<String>? = null,
 ) {
     /** [runtime]: id of the THUMB runtime the app is patched with (Library shows updates). */
     fun toJson(runtime: String? = null): String = org.json.JSONObject().apply {
@@ -36,6 +38,7 @@ data class PatchOptions(
         put("legacy_fs", legacyFs)
         put("overlay", overlay)
         label?.takeIf { it.isNotBlank() }?.let { put("label", it) }
+        fixes?.let { put("fixes", org.json.JSONArray(it.sorted())) }
         put("sandbox", sandbox)
         put("block_internet", blockInternet)
         // The menu always has every mod; "mods" stays so the runtime format can grow per-mod switches again.
@@ -60,6 +63,7 @@ data class PatchOptions(
             blockInternet = json.optBoolean("block_internet", false),
             overlay = json.optBoolean("overlay", true),
             label = json.optString("label").ifBlank { null },
+            fixes = json.optJSONArray("fixes")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() },
         )
 
         val SENSITIVE_PERMISSIONS = setOf(

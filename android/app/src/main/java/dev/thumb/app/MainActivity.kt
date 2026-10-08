@@ -482,7 +482,10 @@ private fun FpsRow(mode: String, onChange: (String) -> Unit) {
 }
 
 @Composable
-private fun OptionsSection(appLabel: String, options: dev.thumb.app.core.PatchOptions, onChange: (dev.thumb.app.core.PatchOptions) -> Unit) {
+private fun OptionsSection(
+    appLabel: String, packageName: String, options: dev.thumb.app.core.PatchOptions,
+    onChange: (dev.thumb.app.core.PatchOptions) -> Unit,
+) {
     val P = dev.thumb.app.core.PatchOptions
 
     SectionDivider()
@@ -503,6 +506,20 @@ private fun OptionsSection(appLabel: String, options: dev.thumb.app.core.PatchOp
         info = P.WARN_SANDBOX)
     OptionRow("Block internet", "The app can't go online at all", options.blockInternet, { onChange(options.copy(blockInternet = it)) },
         enabled = options.sandbox, indent = true, info = P.WARN_BLOCK_INTERNET)
+
+    // Fixes made for this particular app, if THUMB knows any.
+    val known = dev.thumb.app.core.GameFixes.forPackage(packageName)
+    if (known.isNotEmpty()) {
+        SectionDivider()
+        Text("Game fixes", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
+        Text("Tweaks made for $appLabel.", color = Muted, fontSize = 12.sp)
+        val on = options.fixes ?: dev.thumb.app.core.GameFixes.defaults(packageName)
+        for (fix in known) {
+            OptionRow(fix.title, fix.description, fix.id in on, { enabled ->
+                onChange(options.copy(fixes = if (enabled) on + fix.id else on - fix.id))
+            })
+        }
+    }
 
     SectionDivider()
     Text("THUMB overlay", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = accent())
@@ -554,7 +571,7 @@ private fun ReportCard(s: State.Analyzed, onPatch: (dev.thumb.app.core.PatchOpti
             ctx.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${s.info.packageName}")))
         }, modifier = Modifier.fillMaxWidth()) { Text("Uninstall existing app") }
     }
-    OptionsSection(s.info.label, options) { options = it }
+    OptionsSection(s.info.label, s.info.packageName, options) { options = it }
     TButton(onClick = { onPatch(options) }, modifier = Modifier.fillMaxWidth(), enabled = !s.info.conflictingInstall) {
         Text(if (s.update) "Update & install" else "Patch & install", fontWeight = FontWeight.Bold)
     }

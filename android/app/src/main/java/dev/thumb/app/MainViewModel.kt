@@ -191,6 +191,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // Always added (~18 KB): it also applies build options like fullscreen and the FPS display mode.
                 val overlayDex = context.assets.open("runtime/overlay.dex").readBytes()
                 val icon = if (options.overlay) context.assets.open("runtime/icon.png").readBytes() else null
+                // Unset fixes mean "this app's defaults".
+                @Suppress("NAME_SHADOWING")
+                val options = if (options.fixes == null) options.copy(fixes = dev.thumb.app.core.GameFixes.defaults(info.packageName)) else options
                 raw("options: ${options.toJson().replace("\n", " ")}")
                 val unsigned = analyzed.bundle.apks.mapIndexed { i, apk ->
                     val out = File(outDir, "$i-unsigned.apk")
