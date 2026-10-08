@@ -87,6 +87,9 @@ All **official API support ships inside THUMB**, so patched apps work fully offl
 - [ ] Clean up per-thread state on thread exit
 - [ ] Crash reports with guest backtraces (symbolized like the harness does)
 - [ ] Reproducible release builds
+- [ ] **F-Droid**: build libffi from source (submodule or srclib instead of a download), generate the
+      supported-function list during the build, reproducible builds; then submit. (Play Store is
+      unlikely: its policies restrict apps that modify and re-sign other apps)
 
 ## Ideas queue
 
