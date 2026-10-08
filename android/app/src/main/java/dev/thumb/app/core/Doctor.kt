@@ -17,19 +17,34 @@ object Doctor {
         val systemLibs: List<String>,
         val missing: Map<String, List<String>>, // category -> symbols
         val error: String? = null,
-    )
+    ) {
+        /** System libraries it needs that apps may not load on modern Android (Android 7+). */
+        val privateLibs get() = systemLibs.filter { it !in PUBLIC_LIBS }
+        /** Such a library can't load even on a real 32-bit phone today; apps treat it as optional. */
+        val skipped get() = privateLibs.isNotEmpty()
+    }
 
     enum class Level { GOOD, PARTIAL, BAD }
+
+    /** NDK libraries every app may load (the rest are private to the system since Android 7). */
+    val PUBLIC_LIBS = setOf(
+        "libc.so", "libm.so", "libdl.so", "liblog.so", "libz.so", "libstdc++.so", "libandroid.so", "libjnigraphics.so",
+        "libEGL.so", "libGLESv1_CM.so", "libGLESv2.so", "libGLESv3.so", "libOpenSLES.so", "libOpenMAXAL.so",
+        "libaaudio.so", "libvulkan.so", "libmediandk.so", "libcamera2ndk.so", "libnativewindow.so", "libsync.so",
+        "libamidi.so", "libbinder_ndk.so", "libneuralnetworks.so", "libicu.so",
+    )
 
     private val CRITICAL = setOf("OpenGL ES 2/3", "EGL", "NDK window / assets / input")
 
     data class Report(val libs: List<LibReport>) {
-        val handled get() = libs.sumOf { it.handled }
-        val total get() = libs.sumOf { it.total }
+        val counted get() = libs.filter { !it.skipped }
+        val skipped get() = libs.filter { it.skipped }
+        val handled get() = counted.sumOf { it.handled }
+        val total get() = counted.sumOf { it.total }
         val percent get() = if (total == 0) 100 else handled * 100 / total
         val needsThumb get() = libs.isNotEmpty()
         /** Missing one of these means no picture or no window at all, whatever the percentage. */
-        val critical get() = libs.any { lib -> lib.missing.keys.any { it in CRITICAL } }
+        val critical get() = counted.any { lib -> lib.missing.keys.any { it in CRITICAL } }
         val level get() = when {
             percent == 100 -> Level.GOOD
             percent >= 90 && !critical -> Level.PARTIAL

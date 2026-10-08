@@ -37,6 +37,15 @@ CATEGORIES = [
 ]
 
 
+# NDK libraries every app may load; the rest are private to the system since Android 7.
+PUBLIC_LIBS = {
+    "libc.so", "libm.so", "libdl.so", "liblog.so", "libz.so", "libstdc++.so", "libandroid.so", "libjnigraphics.so",
+    "libEGL.so", "libGLESv1_CM.so", "libGLESv2.so", "libGLESv3.so", "libOpenSLES.so", "libOpenMAXAL.so",
+    "libaaudio.so", "libvulkan.so", "libmediandk.so", "libcamera2ndk.so", "libnativewindow.so", "libsync.so",
+    "libamidi.so", "libbinder_ndk.so", "libneuralnetworks.so", "libicu.so",
+}
+
+
 def category(sym):
     for name, test in CATEGORIES:
         if test(sym):
@@ -157,9 +166,14 @@ def main():
         system_needed = [n for n in needed if n not in libs]
         missing = sorted(s for s, weak in imports.items() if s not in have and s not in app_exports and not weak)
         ok = len(imports) - len(missing)
+        private = [n for n in system_needed if n not in PUBLIC_LIBS]
+        pct = 100 * ok // max(len(imports), 1)
+        if private:
+            # Can't load on modern Android even natively: apps treat these as optional.
+            print(f"{name}: not counted (needs private Android libraries: {', '.join(private)})\n")
+            continue
         total_needed += len(imports)
         total_ok += ok
-        pct = 100 * ok // max(len(imports), 1)
         print(f"{name}: {ok}/{len(imports)} imports handled ({pct}%)")
         if system_needed:
             print(f"   system libs: {', '.join(system_needed)}")

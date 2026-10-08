@@ -536,9 +536,14 @@ private fun ReportCard(s: State.Analyzed, onPatch: (dev.thumb.app.core.PatchOpti
     if (details) {
         Text("THUMB Doctor: ${r.percent}% · ${r.handled}/${r.total} system functions supported", color = Muted, fontSize = 13.sp)
         LinearProgressIndicator(progress = { r.percent / 100f }, modifier = Modifier.fillMaxWidth(), color = color, trackColor = Ink)
-        val missing = r.libs.flatMap { it.missing.entries }.groupBy({ it.key }, { it.value.size }).mapValues { it.value.sum() }
+        val missing = r.counted.flatMap { it.missing.entries }.groupBy({ it.key }, { it.value.size }).mapValues { it.value.sum() }
         if (missing.isNotEmpty()) {
             Text(rich("**Not supported yet:** " + missing.entries.sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }), color = Muted, fontSize = 13.sp)
+        }
+        if (r.skipped.isNotEmpty()) {
+            Text(rich("**Not counted:** ${r.skipped.joinToString { it.name }}. They need private Android libraries " +
+                "(${r.skipped.flatMap { it.privateLibs }.distinct().joinToString()}) that no app may load on modern Android, " +
+                "so the app already treats them as optional."), color = Muted, fontSize = 13.sp)
         }
     }
     if (s.info.needsObb) Text(rich("📦 Uses an **extra data file (OBB)**: you can add it right after installing."), color = Muted, fontSize = 13.sp)

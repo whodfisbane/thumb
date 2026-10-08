@@ -50,7 +50,7 @@ OpenSL ES audio and Mono-based Unity games.
       invalidate on fault). The single biggest compatibility unlock
 - [ ] More system APIs: GLES 3, AAudio, OpenAL, libandroid input/assets (`AAsset*`, `AInputQueue`),
       `ANativeActivity` (NativeActivity games)
-- [ ] Doctor: don't count libraries that need private Android system libraries (e.g. VLC's
+- [x] Doctor: don't count libraries that need private Android system libraries (e.g. VLC's
       `libiomx`/`libanw`); modern Android won't load them even natively, so apps already fall back
 - [ ] Choose an already-installed app as the source
 - [ ] Community compatibility list (apps/games, status, notes)
