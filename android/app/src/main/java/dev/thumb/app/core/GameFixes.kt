@@ -11,8 +11,8 @@ object GameFixes {
         "com.worms3.app" to listOf(
             Fix(
                 "worms3-audio-latency", "Lower audio delay",
-                "Worms 3 buffers about a third of a second of sound on modern phones, so explosions are heard late. " +
-                    "This halves the buffer. Turn it off if the sound crackles.",
+                "On modern phones Worms 3 queues over a second of sound, so explosions are heard late. " +
+                    "This cuts it to about 0.16 s. Turn it off if the sound crackles.",
             ),
         ),
     )

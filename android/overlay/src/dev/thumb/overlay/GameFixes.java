@@ -1,7 +1,6 @@
 package dev.thumb.overlay;
 
 import android.app.Application;
-import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.os.Handler;
 import android.os.Looper;
@@ -32,10 +31,13 @@ final class GameFixes {
     }
 
     // ---- Worms 3: lower audio delay ----
-    // Worms sizes its AudioTrack as 4x the minimum buffer (on Android 4.3+),
-    // which on modern phones queues ~340 ms of sound. Shrink the playable part
-    // to two of the chunks it writes (Android 7+ allows that on a live track).
-    // The track is recreated on pause/resume, so keep checking.
+    // Worms refills its AudioTrack one "period" at a time: each time Android
+    // reports a period played, it mixes and writes another. It sets the period
+    // to a quarter of its buffer *in bytes*, which Android counts in frames, so
+    // on modern phones each period is ~0.7 s (22 kHz mono) and over a second of
+    // sound is always queued. The fix makes the period ~80 ms (Worms' own field
+    // and the track's notification period) and the buffer two periods. The
+    // track is recreated on pause/resume, so keep checking.
 
     private static WeakReference<AudioTrack> fixedTrack = new WeakReference<>(null);
 
@@ -43,10 +45,11 @@ final class GameFixes {
         main.postDelayed(new Runnable() {
             @Override public void run() {
                 try {
-                    AudioTrack track = wormsTrack(app.getClassLoader());
-                    if (track != null && track != fixedTrack.get()) {
-                        shrink(track);
-                        fixedTrack = new WeakReference<>(track);
+                    Object thread = wormsAudioThread(app.getClassLoader());
+                    Object track = thread == null ? null : field(thread.getClass(), thread, "m_audioTrack");
+                    if (track instanceof AudioTrack && track != fixedTrack.get()) {
+                        shrink(thread, (AudioTrack) track);
+                        fixedTrack = new WeakReference<>((AudioTrack) track);
                     }
                 } catch (Throwable t) {
                     Log.w(TAG, "fixes: worms3-audio-latency: " + t);
@@ -56,14 +59,41 @@ final class GameFixes {
         }, 2000);
     }
 
-    // Main.m_GLView (static) -> m_Renderer -> m_AudioMixer -> m_audioThread -> m_audioTrack
-    private static AudioTrack wormsTrack(ClassLoader cl) throws Exception {
+    // Main.m_GLView (static) -> m_Renderer -> m_AudioMixer -> m_audioThread
+    private static Object wormsAudioThread(ClassLoader cl) throws Exception {
         Object o = field(Class.forName("com.worms3.app.Main", false, cl), null, "m_GLView");
-        for (String name : new String[] {"m_Renderer", "m_AudioMixer", "m_audioThread", "m_audioTrack"}) {
+        for (String name : new String[] {"m_Renderer", "m_AudioMixer", "m_audioThread"}) {
             if (o == null) return null;
             o = field(o.getClass(), o, name);
         }
-        return o instanceof AudioTrack ? (AudioTrack) o : null;
+        return o;
+    }
+
+    private static void shrink(Object thread, AudioTrack track) throws Exception {
+        int rate = track.getSampleRate();
+        int before = track.getBufferSizeInFrames();
+        if (rate <= 0 || before <= 0) return;
+        int period = Math.max(256, rate * 80 / 1000);  // ~80 ms
+        // Worms writes access$000() * 2 bytes per notification (16-bit), i.e. this many frames.
+        setInt(thread, "m_nNotificationPeriod", period);
+        track.setPositionNotificationPeriod(period);
+        int after = track.setBufferSizeInFrames(Math.min(before, period * 2));
+        Log.i(TAG, "fixes: worms3-audio-latency: period " + ms(period, rate) + " ms, buffer " + ms(before, rate)
+            + " ms -> " + ms(after, rate) + " ms");
+    }
+
+    private static void setInt(Object target, String name, int value) throws Exception {
+        for (Class<?> k = target.getClass(); k != null; k = k.getSuperclass()) {
+            try {
+                Field f = k.getDeclaredField(name);
+                f.setAccessible(true);
+                f.setInt(target, value);
+                return;
+            } catch (NoSuchFieldException e) {
+                // look in the superclass
+            }
+        }
+        throw new NoSuchFieldException(name);
     }
 
     private static Object field(Class<?> c, Object target, String name) throws Exception {
@@ -77,16 +107,6 @@ final class GameFixes {
             }
         }
         return null;
-    }
-
-    private static void shrink(AudioTrack track) {
-        int period = track.getPositionNotificationPeriod();  // frames Worms writes per step
-        int before = track.getBufferSizeInFrames();
-        if (period <= 0 || before <= 0) return;
-        int target = Math.min(before, period * 2);
-        int after = track.setBufferSizeInFrames(target);
-        int rate = track.getSampleRate();
-        Log.i(TAG, "fixes: worms3-audio-latency: buffer " + ms(before, rate) + " ms -> " + ms(after, rate) + " ms");
     }
 
     private static long ms(int frames, int rate) { return rate > 0 ? frames * 1000L / rate : -1; }
