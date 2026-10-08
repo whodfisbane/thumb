@@ -284,9 +284,21 @@ void t_detach(GuestThread& t) {
     set_ret32(t, 0);
 }
 
+// Innermost __pthread_cleanup_t of this thread (see __pthread_cleanup_push below).
+thread_local gaddr t_cleanup_stack = 0;
+
+// pthread_exit runs the thread's cleanup handlers first, newest first, like
+// bionic. Apps that cancel threads by exiting (VLC) unlock mutexes and signal
+// "finished" in them; skipping them leaves other threads waiting forever.
 void t_exit(GuestThread& t) {
+    uint32_t value = t.regs()[0];
+    while (gaddr c = t_cleanup_stack) {
+        t_cleanup_stack = mem().read<uint32_t>(c);
+        gaddr routine = mem().read<uint32_t>(c + 4);
+        if (routine) t.call(routine, GuestArgs().u32(mem().read<uint32_t>(c + 8)));
+    }
     if (t.depth() > 1) H32_WARN("pthread_exit from a nested call: unwinding only the innermost guest frame");
-    t.request_exit(t.regs()[0]);
+    t.request_exit(value);
 }
 
 void t_self(GuestThread& t) { set_ret32(t, self_id()); }
@@ -427,8 +439,7 @@ void t_rwlock_op(GuestThread& t) { set_ret32(t, uint32_t(Fn(host_rwlock(t.regs()
 
 // ---- cleanup handlers (pthread_cleanup_push/pop macros) ----
 // Guest __pthread_cleanup_t: prev(4) routine(4) arg(4), on the guest stack.
-
-thread_local gaddr t_cleanup_stack = 0;
+// t_cleanup_stack is declared with pthread_exit, which runs the handlers.
 
 // void __pthread_cleanup_push(__pthread_cleanup_t* c, void (*routine)(void*), void* arg)
 void t_cleanup_push(GuestThread& t) {

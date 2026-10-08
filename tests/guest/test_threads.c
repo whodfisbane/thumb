@@ -26,6 +26,20 @@ static int once_count;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static void once_fn(void) { once_count++; }
 
+static int cleanups[3], cleanup_order;
+static void cleanup_fn(void* arg) { cleanups[(intptr_t)arg] = ++cleanup_order; }
+static void* cleaner(void* arg) {
+    (void)arg;
+    pthread_cleanup_push(cleanup_fn, (void*)0);
+    pthread_cleanup_push(cleanup_fn, (void*)1);
+    pthread_cleanup_push(cleanup_fn, (void*)2);
+    pthread_cleanup_pop(1);  /* runs handler 2 now */
+    pthread_exit((void*)5);  /* must run 1, then 0 */
+    pthread_cleanup_pop(0);
+    pthread_cleanup_pop(0);
+    return NULL;
+}
+
 static pthread_key_t key;
 static int dtor_calls;
 static void key_dtor(void* v) { (void)v; dtor_calls++; }
@@ -62,4 +76,8 @@ TEST_MAIN({
 
     pthread_t e; void* er; pthread_create(&e, NULL, exiter, NULL); pthread_join(e, &er);
     CHECK(er == (void*)77, "pthread_exit value");
+
+    pthread_t c; void* cr; pthread_create(&c, NULL, cleaner, NULL); pthread_join(c, &cr);
+    CHECK(cr == (void*)5 && cleanups[2] == 1 && cleanups[1] == 2 && cleanups[0] == 3,
+          "pthread_exit runs cleanup handlers, newest first");
 })

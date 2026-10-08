@@ -85,8 +85,11 @@ void t_lock(GuestThread& t) {
         ANativeWindow_unlockAndPost(w);
         return set_ret32(t, uint32_t(-12));
     }
-    // Keep what's already on screen, for apps that only redraw the dirty area.
-    std::memcpy(mem().ptr<void>(shadow), buf.bits, size);
+    // Apps that redraw only a dirty area expect the rest of the buffer to hold
+    // the previous frame: copy it in then. A full redraw (no dirty rect, or
+    // one covering the window) skips the copy, which costs a lot per frame.
+    bool partial = dirty && (rect.left > 0 || rect.top > 0 || rect.right < buf.width || rect.bottom < buf.height);
+    if (partial) std::memcpy(mem().ptr<void>(shadow), buf.bits, size);
     mem().write<int32_t>(out + 0, buf.width);
     mem().write<int32_t>(out + 4, buf.height);
     mem().write<int32_t>(out + 8, buf.stride);
