@@ -98,15 +98,31 @@ void t_cond_broadcast(GuestThread& t) {
 }
 
 // ---- once ----
-std::recursive_mutex g_once_lock;
+// Each pthread_once_t holds its own state: 0 = not started (PTHREAD_ONCE_INIT),
+// 1 = running, 2 = done. The lock only guards state changes, never the init
+// function, so inits on different controls can run (and wait on each other)
+// concurrently; callers of a control that's running wait for it to finish.
+std::mutex g_once_lock;
+std::condition_variable g_once_done;
 void t_once(GuestThread& t) {
     gaddr ctl = t.regs()[0];
     gaddr fn = t.regs()[1];
-    std::lock_guard lk(g_once_lock);
-    if (mem().read<int32_t>(ctl) == 0) {
+    {
+        std::unique_lock lk(g_once_lock);
+        for (;;) {
+            int32_t state = mem().read<int32_t>(ctl);
+            if (state == 2) return set_ret32(t, 0);
+            if (state == 0) break;
+            g_once_done.wait(lk);
+        }
         mem().write<int32_t>(ctl, 1);
-        t.call(fn);
     }
+    t.call(fn);
+    {
+        std::lock_guard lk(g_once_lock);
+        mem().write<int32_t>(ctl, 2);
+    }
+    g_once_done.notify_all();
     set_ret32(t, 0);
 }
 

@@ -40,6 +40,14 @@ static void* cleaner(void* arg) {
     return NULL;
 }
 
+/* Two pthread_once inits that wait on each other across threads: init A
+   starts a thread that runs init B, and waits for it. One global lock deadlocks here. */
+static pthread_once_t once_a = PTHREAD_ONCE_INIT, once_b = PTHREAD_ONCE_INIT;
+static int b_done;
+static void init_b(void) { b_done = 1; }
+static void* run_b(void* arg) { (void)arg; pthread_once(&once_b, init_b); return NULL; }
+static void init_a(void) { pthread_t th; pthread_create(&th, NULL, run_b, NULL); pthread_join(th, NULL); }
+
 static pthread_key_t key;
 static int dtor_calls;
 static void key_dtor(void* v) { (void)v; dtor_calls++; }
@@ -69,6 +77,8 @@ TEST_MAIN({
 
     pthread_once(&once, once_fn); pthread_once(&once, once_fn);
     CHECK(once_count == 1, "pthread_once");
+    pthread_once(&once_a, init_a);
+    CHECK(b_done == 1, "nested pthread_once on another thread doesn't deadlock");
 
     pthread_key_create(&key, key_dtor);
     pthread_t k; void* kr; pthread_create(&k, NULL, keyed, (void*)0x1234); pthread_join(k, &kr);
