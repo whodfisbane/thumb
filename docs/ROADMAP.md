@@ -42,18 +42,16 @@ OpenSL ES audio and Mono-based Unity games.
       and other unsupported formats refuse to load instead of crashing later; tests included)
 - [x] **Guest threads stayed attached to the JVM** after THUMB attached them on their first JNI call;
       ART aborts when an attached thread exits (fixed: detached after the TLS destructors)
-- [ ] **Speed slider breaks absolute timeouts.** The game reads the virtual `CLOCK_REALTIME`, but
-      `pthread_cond_timedwait`/`sem_timedwait` compare its deadline with the real clock (and futex
-      `WAIT_BITSET` passes it through), so after a minute at 2x every short timed wait takes ~60 s,
-      and at 0.5x they time out instantly. The offset stays after going back to 1x. Convert virtual
-      deadlines to real ones; also honour `pthread_condattr_setclock` (ignored, so monotonic conds
-      time out at once), scale relative futex timeouts, and give `CLOCK_BOOTTIME` its own timeline
-      (it shares the monotonic one, so it jumps by (scale − 1) × suspend time)
-- [ ] **Mutex/cond table is fragile:** one global lock + hash lookup per lock/unlock; entries keyed by
-      address, so a mutex freed without `pthread_mutex_destroy` leaves a stale (possibly locked) host
-      mutex for whatever reuses that memory; `cond_wait` on a recursively locked mutex unlocks only
-      one level (deadlock); mutexes are always recursive (`trylock` by the owner returns 0, not
-      `EBUSY`). Fix: implement mutex and cond on the guest word with host futexes, like bionic
+- [x] **Speed slider broke absolute timeouts** (fixed: every timed wait converts the guest's virtual
+      deadline on its own clock into real time: cond/mutex/sem timed waits, futex `WAIT` (scaled) and
+      `WAIT_BITSET`, new `clock_nanosleep`; `pthread_condattr_setclock` is honoured; each scaled clock
+      has its own timeline, so `CLOCK_BOOTTIME` no longer jumps; test runs at 2x via `--speed`)
+- [x] **Mutex/cond table was fragile** (fixed: mutexes and conds live in the guest's own word, bionic32
+      layout, and sleep on host futexes: no table or global lock, static initializers incl. recursive
+      / errorcheck work, reused memory is a fresh mutex, real types (`trylock` by the owner is `EBUSY`,
+      errorcheck `EDEADLK`/`EPERM`), `cond_wait` releases every recursion level; added timedlock,
+      `lock_timeout_np`, `cond_timedwait_monotonic(_np)`, `cond_timeout_np`, `cond_clockwait`). A
+      normal mutex relocked by its owner still counts as recursive (bionic would deadlock), with a warning
 - [ ] **Guest stacks have no guard page** (8 MB blocks from the heap): an overflow silently
       corrupts the heap block below. Reserve stacks with a `PROT_NONE` page under them
 - [ ] `PushLocalFrame`/`PopLocalFrame` are passthroughs: the host frees the refs but their guest
