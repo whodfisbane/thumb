@@ -2,7 +2,8 @@
 # Builds the guest test libraries (tests/guest, armeabi-v7a) with the NDK and
 # runs each through the Linux harness. Exits non-zero on any failure.
 #   NDK=/path/to/android-ndk tools/run-tests.sh   (or ANDROID_SDK_ROOT, see ndk-env.sh)
-# A test source can ask for extra link flags with a line "// ldflags: ...".
+# A test source can ask for extra link flags with a line "// ldflags: ..."
+# and for harness options with a line "// harness: ..." (e.g. --speed 2).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/tools/ndk-env.sh"
@@ -27,7 +28,9 @@ total_fail=0
 for src in "$ROOT"/tests/guest/test_*.c "$ROOT"/tests/guest/test_*.cpp; do
     name=$(basename "${src%.*}")
     build "thumb$name" "$src" || { total_fail=$((total_fail + 1)); continue; }
-    out=$(THUMB_TEST_DIR="$OUT" timeout 60 "$HARNESS" "$OUT/libthumb$name.so" 2>&1)
+    hflags=$(sed -n 's|^// harness: *||p' "$src")
+    # shellcheck disable=SC2086
+    out=$(THUMB_TEST_DIR="$OUT" timeout 60 "$HARNESS" $hflags "$OUT/libthumb$name.so" 2>&1)
     result=$(grep -oE 'RESULT pass=[0-9]+ fail=[0-9]+' <<<"$out" | tail -1)
     if [[ $result =~ fail=0 ]]; then
         printf '  ok    %-14s %s\n' "$name" "$result"

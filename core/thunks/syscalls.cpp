@@ -125,15 +125,27 @@ int32_t sys_open(GuestThread& t, int dirfd, gaddr path_addr, int flags, int mode
 // futex(uaddr, op, val, timeout | val2, uaddr2, val3). Guest addresses are
 // arena addresses, so the host futex works on the very same words. The 4th
 // argument is a (32-bit) timespec for the wait ops and a plain number otherwise.
+// Timeouts follow the speed setting: WAIT's is relative (scaled), WAIT_BITSET's
+// is an absolute guest time on CLOCK_MONOTONIC (or CLOCK_REALTIME with
+// FUTEX_CLOCK_REALTIME), turned into the matching real time on that clock.
 int32_t sys_futex(gaddr uaddr, int op, uint32_t val, uint32_t arg4, gaddr uaddr2, uint32_t val3) {
     int cmd = op & 127 & ~256;  // without FUTEX_PRIVATE_FLAG / FUTEX_CLOCK_REALTIME
     const void* a4 = reinterpret_cast<const void*>(uintptr_t(arg4));
     timespec ts{};
-    if (cmd == 0 /* WAIT */ || cmd == 9 /* WAIT_BITSET */) {
-        if (arg4) {
-            ts = {mem().read<int32_t>(arg4), mem().read<int32_t>(arg4 + 4)};
-            a4 = &ts;
+    if ((cmd == 0 /* WAIT */ || cmd == 9 /* WAIT_BITSET */) && arg4) {
+        int32_t sec = mem().read<int32_t>(arg4), nsec = mem().read<int32_t>(arg4 + 4);
+        if (nsec < 0 || nsec >= 1000000000) return neg_errno(EINVAL);
+        int64_t guest_ns = int64_t(sec) * 1000000000 + nsec, real_ns;
+        if (cmd == 0) {
+            real_ns = timescale::real_sleep_ns(guest_ns);
+        } else {
+            clockid_t clock = (op & 256) ? CLOCK_REALTIME : CLOCK_MONOTONIC;
+            timespec now;
+            ::clock_gettime(clock, &now);
+            real_ns = int64_t(now.tv_sec) * 1000000000 + now.tv_nsec + timescale::real_ns_until(clock, guest_ns);
         }
+        ts = {time_t(real_ns / 1000000000), long(real_ns % 1000000000)};
+        a4 = &ts;
     }
     long r = ::syscall(SYS_futex, mem().ptr<uint32_t>(uaddr), op, val, a4, mem().ptr<uint32_t>(uaddr2), val3);
     return r < 0 ? neg_errno(errno) : int32_t(r);

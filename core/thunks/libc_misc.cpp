@@ -227,6 +227,25 @@ void t_nanosleep(GuestThread& t) {
     set_ret32(t, uint32_t(r));
 }
 
+// int clock_nanosleep(clockid_t, int flags, const struct timespec* req, struct timespec* rem):
+// returns the error number. With TIMER_ABSTIME, req is a guest (virtual) time.
+void t_clock_nanosleep(GuestThread& t) {
+    clockid_t clock = clockid_t(t.regs()[0]);
+    gaddr req = t.regs()[2];
+    int32_t sec = mem().read<int32_t>(req), nsec = mem().read<int32_t>(req + 4);
+    if (nsec < 0 || nsec >= 1000000000) return set_ret32(t, EINVAL);
+    int64_t guest_ns = int64_t(sec) * 1000000000 + nsec;
+    bool absolute = t.regs()[1] & 1 /* TIMER_ABSTIME */;
+    int64_t want = absolute ? timescale::real_ns_until(clock, guest_ns) : timescale::real_sleep_ns(guest_ns);
+    timespec ts{time_t(want / 1000000000), long(want % 1000000000)}, rem{};
+    int r = ::clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &rem);
+    if (gaddr out = t.regs()[3]; out && !absolute) {
+        mem().write<int32_t>(out, int32_t(rem.tv_sec));
+        mem().write<int32_t>(out + 4, int32_t(rem.tv_nsec));
+    }
+    set_ret32(t, uint32_t(r));
+}
+
 void t_clock_gettime(GuestThread& t) {
     timespec ts;
     clockid_t clock = clockid_t(t.regs()[0]);
@@ -316,6 +335,7 @@ void register_libc_misc() {
     add("bsd_signal", t_signal);
     add("sigaction", t_sigaction);
     add("nanosleep", t_nanosleep);
+    add("clock_nanosleep", t_clock_nanosleep);
     add("clock_gettime", t_clock_gettime);
     add("getenv", t_getenv);
     add("setenv", t_setenv);

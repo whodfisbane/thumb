@@ -7,6 +7,7 @@
 //     --no-block      don't block ad-related Java methods
 //     --boot N        Worms 3: boot the game like GERenderer does and render N frames
 //     --game DIR      game data dir (data/, android/obb/..., apk_assets/)
+//     --speed X       run guest time X times as fast (the in-game speed slider)
 #include <sys/stat.h>
 
 #include <cstring>
@@ -21,11 +22,12 @@
 #include "loader/elf_loader.h"
 #include "thunks/libc_internal.h"
 #include "thunks/thunks.h"
+#include "thunks/timescale.h"
 
 using namespace h32;
 
 static int usage() {
-    fprintf(stderr, "usage: harness [-v|-vv] [--map GUEST=HOST]... [--no-block] [--game DIR] [--boot N] <lib.so>\n");
+    fprintf(stderr, "usage: harness [-v|-vv] [--map GUEST=HOST]... [--no-block] [--game DIR] [--boot N] [--speed X] <lib.so>\n");
     return 2;
 }
 
@@ -143,6 +145,7 @@ int main(int argc, char** argv) {
         }
         else if (a == "--boot" && i + 1 < argc) boot_frames = atoi(argv[++i]);
         else if (a == "--game" && i + 1 < argc) game_dir = argv[++i];
+        else if (a == "--speed" && i + 1 < argc) timescale::set_scale(atof(argv[++i]));
         else if (a == "--map" && i + 1 < argc) {
             std::string m = argv[++i];
             auto eq = m.find('=');
