@@ -22,10 +22,21 @@
 #ifndef PT_ARM_EXIDX
 #define PT_ARM_EXIDX 0x70000001
 #endif
+#ifndef DT_RELR
+#define DT_RELRSZ 35
+#define DT_RELR 36
+#define DT_RELRENT 37
+#endif
 
 namespace h32 {
 
 namespace {
+
+// Packed relocations (lld --pack-dyn-relocs=android / relr). Android used
+// these pre-standard tags before DT_RELR existed; bionic accepts both.
+constexpr int32_t kDtAndroidRel = 0x6000000f, kDtAndroidRelSz = 0x60000010;
+constexpr int32_t kDtAndroidRela = 0x60000011, kDtAndroidRelaSz = 0x60000012;
+constexpr int32_t kDtAndroidRelr = 0x6fffe000, kDtAndroidRelrSz = 0x6fffe001, kDtAndroidRelrEnt = 0x6fffe003;
 
 std::recursive_mutex g_modules_mutex;
 std::vector<std::unique_ptr<Module>> g_modules;
@@ -35,6 +46,8 @@ thread_local std::string g_loading_dir;
 struct DynInfo {
     gaddr symtab = 0, strtab = 0, hash = 0, gnu_hash = 0;
     gaddr rel = 0, relsz = 0, jmprel = 0, pltrelsz = 0;
+    gaddr android_rel = 0, android_relsz = 0;  // "APS2" packed REL
+    gaddr relr = 0, relrsz = 0;                // relative relocations as bitmaps
     uint32_t pltrel = DT_REL;
     std::vector<uint32_t> needed;  // strtab offsets
 };
@@ -136,10 +149,27 @@ Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name) 
         case DT_FINI_ARRAY: mod->fini_array = bias + val; break;
         case DT_FINI_ARRAYSZ: mod->fini_count = val / 4; break;
         case DT_NEEDED: d.needed.push_back(val); break;
+        case kDtAndroidRel: d.android_rel = bias + val; break;
+        case kDtAndroidRelSz: d.android_relsz = val; break;
+        case DT_RELR:
+        case kDtAndroidRelr: d.relr = bias + val; break;
+        case DT_RELRSZ:
+        case kDtAndroidRelrSz: d.relrsz = val; break;
+        case DT_RELRENT:
+        case kDtAndroidRelrEnt:
+            if (val != 4) {
+                H32_ERROR("%s: RELR entry size %u, expected 4", name.c_str(), val);
+                return nullptr;
+            }
+            break;
+        // ARM32 only uses REL. Loading without applying these would leave the
+        // library unrelocated and crash somewhere random later, so refuse.
         case DT_RELA:
         case DT_RELASZ:
-            H32_ERROR("%s: RELA relocations are not used on ARM32; file is unusual", name.c_str());
-            break;
+        case kDtAndroidRela:
+        case kDtAndroidRelaSz:
+            H32_ERROR("%s: RELA relocations (dynamic tag 0x%x) are not supported on ARM32", name.c_str(), uint32_t(tag));
+            return nullptr;
         default: break;
         }
     }
@@ -206,25 +236,101 @@ Module* load_module(const std::vector<uint8_t>& bytes, const std::string& name) 
         return v;
     };
 
-    auto apply = [&](gaddr table, uint32_t size) {
-        for (gaddr r = table; r < table + size; r += 8) {
-            uint32_t off = m.read<uint32_t>(r);
-            uint32_t info = m.read<uint32_t>(r + 4);
-            uint32_t type = ELF32_R_TYPE(info), sym = ELF32_R_SYM(info);
-            gaddr where = bias + off;
-            switch (type) {
-            case R_ARM_RELATIVE: m.write<uint32_t>(where, m.read<uint32_t>(where) + bias); break;
-            case R_ARM_ABS32: m.write<uint32_t>(where, m.read<uint32_t>(where) + resolve_sym(sym)); break;
-            case R_ARM_GLOB_DAT:
-            case R_ARM_JUMP_SLOT: m.write<uint32_t>(where, resolve_sym(sym)); break;
-            case 0: break;  // R_ARM_NONE
-            default: H32_ERROR("%s: unsupported relocation type %u at 0x%x", name.c_str(), type, off); break;
-            }
+    auto apply_one = [&](uint32_t off, uint32_t info) {
+        uint32_t type = ELF32_R_TYPE(info), sym = ELF32_R_SYM(info);
+        gaddr where = bias + off;
+        switch (type) {
+        case R_ARM_RELATIVE: m.write<uint32_t>(where, m.read<uint32_t>(where) + bias); break;
+        case R_ARM_ABS32: m.write<uint32_t>(where, m.read<uint32_t>(where) + resolve_sym(sym)); break;
+        case R_ARM_GLOB_DAT:
+        case R_ARM_JUMP_SLOT: m.write<uint32_t>(where, resolve_sym(sym)); break;
+        case 0: break;  // R_ARM_NONE
+        default: H32_ERROR("%s: unsupported relocation type %u at 0x%x", name.c_str(), type, off); break;
         }
     };
+    auto apply = [&](gaddr table, uint32_t size) {
+        for (gaddr r = table; r < table + size; r += 8) apply_one(m.read<uint32_t>(r), m.read<uint32_t>(r + 4));
+    };
+
+    // RELR: a list of 32-bit words. An even word is the address of a relative
+    // relocation; an odd word is a bitmap of the next 31 words after the last
+    // address (bit i set = relocate word i - 1).
+    auto apply_relr = [&](gaddr table, uint32_t size) {
+        uint32_t next = 0;
+        for (gaddr r = table; r + 4 <= table + size; r += 4) {
+            uint32_t e = m.read<uint32_t>(r);
+            if (!(e & 1)) {
+                m.write<uint32_t>(bias + e, m.read<uint32_t>(bias + e) + bias);
+                next = e + 4;
+                continue;
+            }
+            uint32_t off = next;
+            for (uint32_t bits = e >> 1; bits; bits >>= 1, off += 4)
+                if (bits & 1) m.write<uint32_t>(bias + off, m.read<uint32_t>(bias + off) + bias);
+            next += 31 * 4;
+        }
+    };
+
+    // Android packed relocations: "APS2", then SLEB128 numbers: the count, the
+    // first offset, then groups that may share their offset delta and/or info
+    // (bionic's packed_reloc_iterator). REL only, so groups never carry addends.
+    auto apply_android = [&](gaddr table, uint32_t size) -> bool {
+        if (size < 4 || std::memcmp(m.ptr<char>(table), "APS2", 4) != 0) {
+            H32_ERROR("%s: packed relocations without the APS2 header", name.c_str());
+            return false;
+        }
+        gaddr p = table + 4;
+        const gaddr end = table + size;
+        bool truncated = false;
+        auto sleb = [&]() -> uint32_t {
+            uint32_t v = 0;
+            unsigned shift = 0;
+            uint8_t byte;
+            do {
+                if (p >= end) {
+                    truncated = true;
+                    return 0;
+                }
+                byte = m.read<uint8_t>(p++);
+                if (shift < 32) v |= uint32_t(byte & 0x7f) << shift;
+                shift += 7;
+            } while (byte & 0x80);
+            if (shift < 32 && (byte & 0x40)) v |= ~0u << shift;  // sign-extend
+            return v;
+        };
+        enum : uint32_t { kGroupedByInfo = 1, kGroupedByOffsetDelta = 2, kGroupedByAddend = 4, kGroupHasAddend = 8 };
+        const uint32_t count = sleb();
+        uint32_t offset = sleb(), info = 0, done = 0;
+        while (done < count && !truncated) {
+            const uint32_t group_size = sleb(), flags = sleb();
+            if (flags & kGroupHasAddend) {
+                H32_ERROR("%s: packed REL relocations with addends", name.c_str());
+                return false;
+            }
+            const uint32_t delta = (flags & kGroupedByOffsetDelta) ? sleb() : 0;
+            if (flags & kGroupedByInfo) info = sleb();
+            for (uint32_t i = 0; i < group_size && !truncated; i++, done++) {
+                offset += (flags & kGroupedByOffsetDelta) ? delta : sleb();
+                if (!(flags & kGroupedByInfo)) info = sleb();
+                if (!truncated) apply_one(offset, info);
+            }
+        }
+        if (truncated || done != count) {
+            H32_ERROR("%s: packed relocations end early (%u of %u)", name.c_str(), done, count);
+            return false;
+        }
+        H32_DEBUG("%s: applied %u packed relocations", name.c_str(), count);
+        return true;
+    };
+
+    if (d.relr) apply_relr(d.relr, d.relrsz);
+    if (d.android_rel && !apply_android(d.android_rel, d.android_relsz)) return nullptr;
     if (d.rel) apply(d.rel, d.relsz);
     if (d.jmprel) {
-        if (d.pltrel != DT_REL) H32_ERROR("%s: DT_PLTREL is not REL", name.c_str());
+        if (d.pltrel != DT_REL) {
+            H32_ERROR("%s: DT_PLTREL is not REL", name.c_str());
+            return nullptr;
+        }
         apply(d.jmprel, d.pltrelsz);
     }
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Builds the guest test libraries (tests/guest, armeabi-v7a) with the NDK and
 # runs each through the Linux harness. Exits non-zero on any failure.
-#   NDK=/path/to/android-ndk tools/run-tests.sh
+#   NDK=/path/to/android-ndk tools/run-tests.sh   (or ANDROID_SDK_ROOT, see ndk-env.sh)
+# A test source can ask for extra link flags with a line "// ldflags: ...".
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-NDK=${NDK:-/home/powmy/android-sdk/android-ndk-r30}
+. "$ROOT/tools/ndk-env.sh"
 BIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 CC="$BIN/armv7a-linux-androideabi21-clang"
 CXX="$BIN/armv7a-linux-androideabi21-clang++"
@@ -16,7 +17,9 @@ mkdir -p "$OUT"
 build() { # name sources...
     local name=$1; shift
     local cc=$CC; [[ $1 == *.cpp ]] && cc="$CXX -static-libstdc++"
-    $cc -shared -fPIC -O1 -o "$OUT/lib$name.so" "$@" || { echo "BUILD FAIL $name"; return 1; }
+    local ldflags; ldflags=$(sed -n 's|^// ldflags: *||p' "$1")
+    # shellcheck disable=SC2086
+    $cc -shared -fPIC -O1 -o "$OUT/lib$name.so" "$@" $ldflags || { echo "BUILD FAIL $name"; return 1; }
 }
 build thumbtest_helper "$ROOT/tests/guest/helper.c"
 
