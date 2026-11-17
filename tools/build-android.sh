@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Cross-compiles the translator for arm64 Android.
-#   NDK=/path/to/android-ndk tools/build-android.sh [--dev]
+#   NDK=/path/to/android-ndk tools/build-android.sh [--dev]   (or ANDROID_SDK_ROOT, see ndk-env.sh)
 # Output: build-android/libthumb.so and build-android/libthumb_stub.so
 #   --dev  enable developer conveniences (OBB fetch over adb reverse). Never release these.
 set -euo pipefail
 DEV=OFF
 [ "${1:-}" = "--dev" ] && DEV=ON
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-NDK=${NDK:-/home/powmy/android-sdk/android-ndk-r30}
+. "$ROOT/tools/ndk-env.sh"
 API=29
 OUT=$ROOT/build-android
 DEPS=$OUT/deps
@@ -19,8 +19,17 @@ mkdir -p "$DEPS/include"
 
 # libffi (static, for the Java -> guest native trampolines)
 FFI_VER=3.8.0
+FFI_SHA256=7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4
 if [ ! -d "$ROOT/third_party/libffi-$FFI_VER" ]; then
-    curl -sfL "https://github.com/libffi/libffi/releases/download/v$FFI_VER/libffi-$FFI_VER.tar.gz" | tar xz -C "$ROOT/third_party"
+    tarball=$(mktemp)
+    curl -sfL -o "$tarball" "https://github.com/libffi/libffi/releases/download/v$FFI_VER/libffi-$FFI_VER.tar.gz"
+    if ! echo "$FFI_SHA256  $tarball" | sha256sum -c --quiet; then
+        echo "error: libffi-$FFI_VER.tar.gz does not match the pinned sha256" >&2
+        rm -f "$tarball"
+        exit 1
+    fi
+    tar xzf "$tarball" -C "$ROOT/third_party"
+    rm -f "$tarball"
 fi
 if [ ! -f "$DEPS/lib/libffi.a" ]; then
     mkdir -p "$OUT/libffi"

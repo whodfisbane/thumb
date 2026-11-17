@@ -19,8 +19,20 @@ import tempfile
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SDK = pathlib.Path(os.environ.get("ANDROID_SDK", "/home/powmy/android-sdk"))
-NDK = pathlib.Path(os.environ.get("NDK", SDK / "android-ndk-r30"))
+NDK_VERSION = "30.0.16248370"  # keep in sync with tools/ndk-env.sh
+
+
+def _env_dir(*names):
+    for n in names:
+        if os.environ.get(n):
+            return pathlib.Path(os.environ[n])
+    return None
+
+
+SDK = _env_dir("ANDROID_SDK", "ANDROID_SDK_ROOT", "ANDROID_HOME")
+if SDK is None:
+    sys.exit("error: set ANDROID_SDK_ROOT (or ANDROID_HOME) to your Android SDK")
+NDK = _env_dir("NDK") or SDK / "ndk" / NDK_VERSION
 KEYSTORE = pathlib.Path(os.environ.get("THUMB_KEYSTORE", pathlib.Path.home() / ".config/thumb/thumb.keystore"))
 KEY_PASS = "thumbkey1"  # local signing key only; it protects nothing
 

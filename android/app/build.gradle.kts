@@ -6,6 +6,10 @@ plugins {
 android {
     namespace = "dev.thumb.app"
     compileSdk = 37
+    // Used to strip the runtime. Keep in sync with tools/ndk-env.sh and CI.
+    // $NDK points at an NDK outside the SDK (it must still be this version).
+    ndkVersion = "30.0.16248370"
+    System.getenv("NDK")?.let { ndkPath = it }
 
     defaultConfig {
         applicationId = "dev.thumb.app"
@@ -70,8 +74,10 @@ dependencies {
 // Built by tools/build-android.sh; Doctor's list of supported functions comes
 // from the Linux harness, so the app always matches the runtime it ships.
 val repoRoot = rootDir.parentFile
-val ndkStrip = File(System.getenv("NDK") ?: "/home/powmy/android-sdk/android-ndk-r30",
-    "toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip")
+// SDK and NDK locations come from AGP (local.properties / ANDROID_HOME, and
+// ndkVersion/ndkPath above); a missing one fails the build with AGP's message.
+val sdkComponents = androidComponents.sdkComponents
+val ndkStrip = sdkComponents.ndkDirectory.map { it.file("toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip").asFile }
 val runtimeAssets = layout.projectDirectory.dir("src/main/assets/runtime")
 
 val bundleThumbRuntime by tasks.registering {
@@ -85,7 +91,7 @@ val bundleThumbRuntime by tasks.registering {
         for ((src, dst) in listOf("libthumb.so" to "libthumb.so", "libthumb_stub.so" to "libthumb_stub.so")) {
             val input = File(buildDir, src)
             check(input.exists()) { "missing $input: run tools/build-android.sh first" }
-            val proc = ProcessBuilder(ndkStrip.path, "--strip-unneeded", "-o", File(out, dst).path, input.path)
+            val proc = ProcessBuilder(ndkStrip.get().path, "--strip-unneeded", "-o", File(out, dst).path, input.path)
                 .inheritIO().start()
             check(proc.waitFor() == 0) { "llvm-strip failed for $src" }
         }
@@ -98,14 +104,14 @@ val bundleThumbRuntime by tasks.registering {
 // The in-game menu (android/overlay) is compiled to a standalone dex that the
 // patcher adds to apps. Plain javac + d8 against android.jar: it must not
 // depend on anything (the patched app ships its own libraries).
-val sdkDir = File(System.getenv("ANDROID_SDK_ROOT") ?: "/home/powmy/android-sdk")
 val buildOverlayDex by tasks.registering {
     description = "Compiles the THUMB overlay to assets/runtime/overlay.dex"
     val src = File(rootDir, "overlay/src")
     inputs.dir(src)
     outputs.file(runtimeAssets.file("overlay.dex"))
     doLast {
-        val androidJar = File(sdkDir, "platforms/android-37.0/android.jar")
+        val sdkDir = sdkComponents.sdkDirectory.get().asFile
+        val androidJar = sdkComponents.bootClasspath.get().map { it.asFile }.first { it.name == "android.jar" }
         val d8 = sdkDir.resolve("build-tools").listFiles()!!.sortedDescending().map { File(it, "d8") }.first { it.exists() }
         val classes = layout.buildDirectory.dir("overlay/classes").get().asFile.apply { deleteRecursively(); mkdirs() }
         val dexOut = layout.buildDirectory.dir("overlay/dex").get().asFile.apply { deleteRecursively(); mkdirs() }

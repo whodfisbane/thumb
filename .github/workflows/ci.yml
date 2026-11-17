@@ -7,7 +7,12 @@ on:
   workflow_dispatch:
 
 env:
-  NDK_VERSION: "30.0.16248370"
+  NDK_VERSION: "30.0.16248370"  # keep in sync with tools/ndk-env.sh
+  # CMake picks these up for both the harness and the NDK build.
+  CMAKE_C_COMPILER_LAUNCHER: ccache
+  CMAKE_CXX_COMPILER_LAUNCHER: ccache
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
 
 jobs:
   build:
@@ -18,12 +23,20 @@ jobs:
           submodules: recursive
 
       - name: Host dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libboost-dev libffi-dev zlib1g-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libboost-dev libffi-dev zlib1g-dev pkg-config ccache
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
+
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ env.NDK_VERSION }}-${{ github.sha }}
+          restore-keys: ccache-${{ env.NDK_VERSION }}-
 
       - name: Android NDK
         run: |
@@ -39,7 +52,7 @@ jobs:
       - name: Android runtime (release, no --dev)
         run: tools/build-android.sh
 
-      - name: THUMB app (release, unsigned unless signing secrets are set)
+      - name: THUMB app (unit tests; release, unsigned unless signing secrets are set)
         working-directory: android
         env:
           KEYSTORE_B64: ${{ secrets.THUMB_RELEASE_KEYSTORE_B64 }}
@@ -50,7 +63,7 @@ jobs:
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
             export THUMB_RELEASE_KEYSTORE="$RUNNER_TEMP/release.keystore"
           fi
-          ./gradlew assembleRelease --console=plain
+          ./gradlew testDebugUnitTest assembleRelease --console=plain
 
       - uses: actions/upload-artifact@v4
         with:
