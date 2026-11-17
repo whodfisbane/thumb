@@ -6,7 +6,7 @@
 
 Run old **32-bit-only Android apps and games** (armeabi-v7a) on modern **64-bit-only phones** (Pixel 8 and newer, …) — no root, no emulator.
 
-The game's Java code runs normally on the phone. Its native 32-bit `.so` is replaced by a small 64-bit stub that loads the original library into a sandboxed 4 GB guest address space and runs it through a JIT (ARM32 → ARM64, via [dynarmic](https://github.com/azahar-emu/dynarmic)). Calls into the system — libc, OpenGL ES 1, zlib, JNI — are forwarded to the real 64-bit libraries through *thunks* that convert between the 32-bit and 64-bit ABIs.
+The game's Java code runs normally on the phone. Its native 32-bit `.so` is replaced by a small 64-bit stub that loads the original library into its own 4 GB guest address space (isolated from THUMB's memory, but not a security boundary) and runs it through a JIT (ARM32 → ARM64, via [dynarmic](https://github.com/azahar-emu/dynarmic)). Calls into the system — libc, OpenGL ES 1, zlib, JNI — are forwarded to the real 64-bit libraries through *thunks* that convert between the 32-bit and 64-bit ABIs.
 
 Built gaming-first: the first app it ran was **Worms 3** (`com.worms3.app` 2.1). It also works for
 old non-game apps. The name is a pun: *Thumb* is the 32-bit ARM instruction set most of these old

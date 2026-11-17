@@ -36,8 +36,28 @@ OpenSL ES audio and Mono-based Unity games.
 - [x] **`pthread_once` holds one global lock** (fixed: per-control state, test included) while running the init function: an init that waits on
       another thread which hits a different `pthread_once` deadlocks (common in C++ static init).
       Use a per-`once_control` state with a condition variable
-- [ ] Mutexes are always recursive: `pthread_mutex_trylock` by the owner returns 0 instead of `EBUSY`
-      for normal/errorcheck mutexes. Track the mutex type
+- [x] **Raw `exit` syscall ended the whole process** (fixed: `exit` (1) ends the calling thread,
+      `exit_group` (248) ends the process without atexit handlers)
+- [x] **Packed relocations were silently ignored** (fixed: RELR and Android APS2 are applied, RELA
+      and other unsupported formats refuse to load instead of crashing later; tests included)
+- [x] **Guest threads stayed attached to the JVM** after THUMB attached them on their first JNI call;
+      ART aborts when an attached thread exits (fixed: detached after the TLS destructors)
+- [ ] **Speed slider breaks absolute timeouts.** The game reads the virtual `CLOCK_REALTIME`, but
+      `pthread_cond_timedwait`/`sem_timedwait` compare its deadline with the real clock (and futex
+      `WAIT_BITSET` passes it through), so after a minute at 2x every short timed wait takes ~60 s,
+      and at 0.5x they time out instantly. The offset stays after going back to 1x. Convert virtual
+      deadlines to real ones; also honour `pthread_condattr_setclock` (ignored, so monotonic conds
+      time out at once), scale relative futex timeouts, and give `CLOCK_BOOTTIME` its own timeline
+      (it shares the monotonic one, so it jumps by (scale − 1) × suspend time)
+- [ ] **Mutex/cond table is fragile:** one global lock + hash lookup per lock/unlock; entries keyed by
+      address, so a mutex freed without `pthread_mutex_destroy` leaves a stale (possibly locked) host
+      mutex for whatever reuses that memory; `cond_wait` on a recursively locked mutex unlocks only
+      one level (deadlock); mutexes are always recursive (`trylock` by the owner returns 0, not
+      `EBUSY`). Fix: implement mutex and cond on the guest word with host futexes, like bionic
+- [ ] **Guest stacks have no guard page** (8 MB blocks from the heap): an overflow silently
+      corrupts the heap block below. Reserve stacks with a `PROT_NONE` page under them
+- [ ] `PushLocalFrame`/`PopLocalFrame` are passthroughs: the host frees the refs but their guest
+      handles stay in the table (attached loop threads only free them on `DeleteLocalRef`)
 - [ ] **Signing key can't be backed up.** It lives in AndroidKeyStore, so reinstalling THUMB, a factory
       reset or a new phone loses it, and patched apps can then only be updated by uninstalling them
       (which wipes their saves). Options: an exportable key generated in software and backed up
@@ -46,10 +66,14 @@ OpenSL ES audio and Mono-based Unity games.
 ## Phase 3: Compatibility
 
 - [ ] **OpenSL ES** (audio): a large share of 2011–2016 NDK games output sound through it. Top item
-- [ ] **Mono-based Unity games** (arm32-only apps are mostly pre-2019, i.e. the Mono era): the Mono
-      JIT writes ARM code into RWX memory without calling `mprotect` each time, so invalidating on
-      `mprotect` misses it. Needs write tracking on executable pages (write-protect translated pages,
-      invalidate on fault). The single biggest compatibility unlock
+- [ ] **Unity, IL2CPP first:** arm32 IL2CPP games have no JIT, so they may already be close. Try one
+      before Mono
+- [ ] **Mono-based Unity games** (arm32-only apps are mostly pre-2019, i.e. the Mono era). Two
+      prerequisites: (1) **guest signal delivery** — `sigaction` and `pthread_kill` are no-ops today,
+      but Mono uses SIGSEGV for implicit null checks and signals to suspend threads for GC, so it
+      won't boot without them; (2) write tracking on executable pages — the Mono JIT writes ARM code
+      into RWX memory without calling `mprotect` each time, so invalidating on `mprotect` misses it
+      (write-protect translated pages, invalidate on fault). The single biggest compatibility unlock
 - [ ] More system APIs: GLES 3, AAudio, OpenAL, libandroid input/assets (`AAsset*`, `AInputQueue`),
       `ANativeActivity` (NativeActivity games)
 - [x] Doctor: don't count libraries that need private Android system libraries (e.g. VLC's
@@ -78,7 +102,9 @@ All **official API support ships inside THUMB**, so patched apps work fully offl
       > or spoil the game for other players.
 - [ ] Force texture filtering (via the GLES thunks)
 - [ ] Gamepad → touch mapping for touch-only games
-- [ ] Log / crash viewer for the patched app's `thumb` log
+- [ ] Log / crash viewer for the patched app's `thumb` log. Crashes are invisible today (`fatal()`
+      is a bare `abort()`, missing imports quietly return 0): write a crash / missing-symbol report
+      through the existing game → THUMB channel (`ObbProvider.update`) and show it in the Library
 - [ ] Custom icon (badge) for patched apps
 
 ## Phase 5: Performance and polish
@@ -87,6 +113,10 @@ All **official API support ships inside THUMB**, so patched apps work fully offl
 - [ ] Clean up per-thread state on thread exit
 - [ ] Crash reports with guest backtraces (symbolized like the harness does)
 - [ ] Reproducible release builds
+- [ ] **Patcher streaming:** every entry is read into a `ByteArray` and re-deflated, so big
+      asset-heavy APKs can run out of memory and patch slowly. Stream entries and copy unchanged
+      compressed bytes raw
+- [ ] Golden tests for patcher/unpatcher/zip code (patch → unpatch → compare on a tiny fake APK)
 - [ ] **F-Droid**: build libffi from source (submodule or srclib instead of a download), generate the
       supported-function list during the build, reproducible builds; then submit. (Play Store is
       unlikely: its policies restrict apps that modify and re-sign other apps)
