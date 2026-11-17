@@ -35,6 +35,12 @@ private:
     JNIEnv* prev_;
 };
 
+// Detaches the calling thread from the JVM if it is attached. Guest-created
+// threads get attached implicitly on their first JNI call (the guest doesn't
+// know, so it never detaches), and ART aborts the app when a thread exits
+// while still attached. Called when a guest thread finishes.
+void detach_current_thread();
+
 // Calls a guest JNI_OnLoad(JavaVM*, void*) and returns its result.
 jint call_JNI_OnLoad(gaddr fn, JNIEnv* env);
 // Object handles currently held by the guest (bounded now that they're freed).

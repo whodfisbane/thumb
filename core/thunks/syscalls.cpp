@@ -177,9 +177,18 @@ void t_linux_syscall(GuestThread& t) {
     case kClockGettime: ret = sys_clock_gettime(t); break;
     case kFutex: ret = sys_futex(r[0], int32_t(r[1]), r[2], r[3], r[4], r[5]); break;
     case kExit:
+        // ARM EABI exit (1) ends only the calling thread. Stop its guest code
+        // like pthread_exit does; the thread's owner cleans up after it.
+        H32_INFO("guest exit syscall(%d): ending this thread", int32_t(r[0]));
+        if (t.depth() > 1) H32_WARN("exit syscall from a nested call: unwinding only the innermost guest frame");
+        t.request_exit(0);
+        ret = 0;
+        break;
     case kExitGroup:
-        H32_INFO("guest exit syscall(%d)", int32_t(r[0]));
-        std::exit(int32_t(r[0]));
+        // exit_group (248) ends the whole process at once: no atexit handlers.
+        H32_INFO("guest exit_group syscall(%d)", int32_t(r[0]));
+        std::fflush(nullptr);
+        ::_exit(int32_t(r[0]));
     default:
         H32_WARN("raw syscall %u (r0=%08x r1=%08x r2=%08x) from %s not supported", nr, r[0], r[1], r[2],
                  describe_address(r[15]).c_str());

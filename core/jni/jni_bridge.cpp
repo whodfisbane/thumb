@@ -206,6 +206,13 @@ JNIEnv* host_env() {
     return t_env;
 }
 
+void detach_current_thread() {
+    if (!t_env || !g_host_vm) return;
+    H32_DEBUG("jni: detaching finished guest thread from the JVM");
+    g_host_vm->DetachCurrentThread();
+    t_env = nullptr;
+}
+
 EnvScope::EnvScope(JNIEnv* env) : prev_(t_env) { t_env = env; }
 EnvScope::~EnvScope() { t_env = prev_; }
 

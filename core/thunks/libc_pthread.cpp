@@ -10,6 +10,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "jni/jni_bridge.h"
 #include "thunks/libc_internal.h"
 #include "thunks/thunks.h"
 
@@ -244,6 +245,7 @@ void t_create(GuestThread& t) {
         a.u32(arg);
         uint32_t ret = gt.call(start, a).r0;
         run_tls_destructors(gt);
+        jni::detach_current_thread();  // after the destructors: they may use JNI
         bool detached;
         {
             std::lock_guard lk(st->m);
