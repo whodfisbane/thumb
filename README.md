@@ -6,7 +6,7 @@
 
 Run old **32-bit-only Android apps and games** (armeabi-v7a) on modern **64-bit-only phones** (Pixel 8 and newer, …) — no root, no emulator.
 
-The game's Java code runs normally on the phone. Its native 32-bit `.so` is replaced by a small 64-bit stub that loads the original library into its own 4 GB guest address space (isolated from THUMB's memory, but not a security boundary) and runs it through a JIT (ARM32 → ARM64, via [dynarmic](https://github.com/azahar-emu/dynarmic)). Calls into the system — libc, OpenGL ES 1, zlib, JNI — are forwarded to the real 64-bit libraries through *thunks* that convert between the 32-bit and 64-bit ABIs.
+The game's Java code runs normally on the phone. Its native 32-bit `.so` is replaced by a small 64-bit stub that loads the original library into its own 4 GB guest address space (isolated from THUMB's memory, but not a security boundary) and runs it through a JIT (ARM32 → ARM64, via [dynarmic](https://github.com/azahar-emu/dynarmic)). Calls into the system — libc, OpenGL ES 1 and 2, EGL, zlib, JNI, media decoding — are forwarded to the real 64-bit libraries through *thunks* that convert between the 32-bit and 64-bit ABIs.
 
 Built gaming-first: the first app it ran was **Worms 3** (`com.worms3.app` 2.1). It also works for
 old non-game apps. The name is a pun: *Thumb* is the 32-bit ARM instruction set most of these old
@@ -45,7 +45,8 @@ Tested on: Pixel 9a, GrapheneOS, Android 17 (API 37), arm64-only.
 | THUMB app: import APK/bundle, patch, sign and install on the phone, OBB import | ✅ |
 | Per-app options, in-game menu | ✅ |
 | Library: update, options, data file, uninstall | ✅ |
-| More games and apps | ⏳ |
+| Correctness pass: bionic-style mutexes/conds, timeouts that follow the speed slider, packed relocations | ✅ (needs a check on a phone) |
+| More games and apps (OpenSL ES audio, Unity) | ⏳ |
 
 ## Download
 
@@ -97,11 +98,15 @@ with a **three-finger double tap**. It has an FPS counter, a speed slider (slow 
 - **CPU:** the original ARM32 code is JIT-translated to ARM64 with dynarmic, the first time each
   block runs, then cached. Guest memory is a 4 GB arena, so a 32-bit pointer maps to a host pointer by
   adding a constant.
-- **Loader:** an ELF32 loader maps the library, applies relocations, loads its sibling libraries and runs
-  constructors and `JNI_OnLoad`.
-- **Thunks:** imports (libc, libm, pthreads, zlib, OpenGL ES 1, liblog, libandroid, …) resolve to tiny
-  stubs that jump into 64-bit host code, converting between the 32-bit and 64-bit ABIs. Raw `svc`
-  syscalls are emulated too (some games ship self-unpacking libraries).
+- **Loader:** an ELF32 loader maps the library, applies relocations (including packed RELR and
+  Android APS2 tables), loads its sibling libraries and runs constructors and `JNI_OnLoad`.
+- **Thunks:** about 750 imports (libc, libm, pthreads, zlib, OpenGL ES 1 + 2, EGL, native windows,
+  AMediaCodec, sockets, liblog, libandroid, …) resolve to tiny stubs that jump into 64-bit host code,
+  converting between the 32-bit and 64-bit ABIs. Raw `svc` syscalls are emulated too (some games ship
+  self-unpacking libraries).
+- **Threads:** guest threads are host threads. Mutexes and condition variables live in the game's own
+  memory, like bionic's, and wait on host futexes. The speed slider runs a virtual clock; every
+  timeout the game sets is converted from that clock, so waits stay correct at any speed.
 - **JNI:** the guest gets a 32-bit `JNIEnv`. Java objects map to 32-bit handles, and native methods
   registered by the game become libffi closures that Java can call.
 - **Install:** the THUMB app rewrites the APK on the phone (manifest updated for modern Android,
@@ -122,15 +127,31 @@ android/    THUMB app (Kotlin/Compose): Doctor, on-phone patching, signing, inst
             overlay/: the in-game menu (plain Android views, added to patched apps as a small dex)
 harness/    Linux test runner with a fake JVM
 shim/       Android runtime (libthumb.so) and per-library stub
-tools/      build and code-generation scripts
+tests/      guest/: ARM32 test libraries run through the harness
+tools/      build, test and code-generation scripts
 ```
 
 ## Building
 
 Everything needed to build THUMB is in this repository (plus the two submodules).
 
-**Requirements:** Linux, CMake + Ninja, a C++20 compiler, Boost headers, libffi (for the Linux
-harness), Python 3, JDK 21, the Android SDK (platform 37, build-tools 37) and NDK r30 (the versions CI uses).
+**Requirements:** Linux (on Windows, WSL 2 with Ubuntu works), CMake + Ninja, a C++20 compiler,
+Boost headers, libffi (for the Linux harness), Python 3, JDK 21, the Android SDK (platform 37.0,
+build-tools 37) and NDK `30.0.16248370` (r30, the version CI uses; pinned in `tools/ndk-env.sh`).
+
+On Ubuntu:
+
+```sh
+sudo apt-get install build-essential cmake ninja-build libboost-dev libffi-dev zlib1g-dev pkg-config \
+    python3 openjdk-21-jdk-headless unzip curl
+# Android SDK command-line tools unpacked in $ANDROID_SDK_ROOT/cmdline-tools/latest, then:
+sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;30.0.16248370"
+export ANDROID_SDK_ROOT=~/android-sdk         # wherever the SDK lives
+```
+
+The scripts find the NDK in `$ANDROID_SDK_ROOT/ndk/30.0.16248370`, or wherever `$NDK` points, and
+stop with an error if there is none. Gradle reads the SDK from `ANDROID_SDK_ROOT` / `ANDROID_HOME` or
+`android/local.properties`.
 
 ```sh
 git clone --recursive https://github.com/whodfisbane/thumb.git && cd thumb
@@ -138,12 +159,13 @@ git clone --recursive https://github.com/whodfisbane/thumb.git && cd thumb
 # 1. Linux harness (also generates the supported-function list the app ships)
 cmake -S . -B build -G Ninja && ninja -C build harness
 
-# 2. Android runtime: build-android/libthumb.so + libthumb_stub.so (downloads libffi once)
-NDK=/path/to/android-ndk tools/build-android.sh       # --dev: developer extras, never for releases
+# 2. Android runtime: build-android/libthumb.so + libthumb_stub.so
+#    (downloads libffi once and checks it against a pinned sha256)
+tools/build-android.sh                  # --dev: developer extras, never for releases
 
 # 3. The THUMB app
 cd android
-./gradlew assembleDebug                                # or assembleRelease, see below
+./gradlew assembleDebug                 # or assembleRelease, see below
 ```
 
 The app bundles the runtime from `build-android/` and the function list from `build/harness`, so
@@ -155,8 +177,17 @@ Developers can also patch an APK on the PC: `tools/repack.py original.apk patche
 ### Tests
 
 ```sh
-NDK=/path/to/android-ndk tools/run-tests.sh   # ARM32 test libraries run through the harness
+tools/run-tests.sh                      # ARM32 test libraries run through the harness
+cd android && ./gradlew testDebugUnitTest
 ```
+
+Each `tests/guest/test_*.c` is built with the NDK as a 32-bit library and run by the harness, which
+prints its `RESULT pass=… fail=…` line. They cover libc, printf/scanf, setjmp, C++ exceptions, files,
+soft-float, `dlopen`, raw syscalls, threads, mutexes and condition variables, packed relocations, and
+timed waits at 2x speed. A test can ask for extra link flags with a `// ldflags: …` line and for
+harness options with `// harness: …` (for example `--speed 2`). CI runs both suites on every push.
+
+The one Kotlin test needs a real APK (`THUMB_TEST_APK=/path/to.apk`) and is skipped without one.
 
 ## License
 
